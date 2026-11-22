@@ -1,20 +1,20 @@
 (function () {
   "use strict";
 
-  const DB_NAME = "coaching";
-  const DB_STORE = "kv";
-  const DB_KEY = "etat";
+  const DB_NAME = "coaching", DB_STORE = "kv", DB_KEY = "etat";
   const MIROIR_LS = "coaching-miroir";
   const FORMAT_SAUVEGARDE = "coaching-sauvegarde-v1";
   const JOURS_SEANCE = { 1: [0], 2: [1, 4], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] };
   const GRAPHIQUES = {
     fcRepos: { titre: "FC de repos", unite: "bpm", decimales: 0 },
-    vfc: { titre: "Variabilité cardiaque (VFC)", unite: "ms", decimales: 0 },
+    vfc: { titre: "VFC", unite: "ms", decimales: 0 },
     sommeil: { titre: "Sommeil", unite: "h", decimales: 1 },
     poids: { titre: "Poids", unite: "kg", decimales: 1 }
   };
+  const COULEURS_PHASE = ["#2dd4bf", "#60a5fa", "#f59e0b", "#ff4d1f"];
   const EX = () => window.EXERCICES;
   const PH = () => window.PHASES_PROGRAMME;
+  const ACTIONS_BILAN = { monte: "▲ Niveau suivant", reste: "■ Consolidation", recule: "▼ Allègement" };
 
   // ---------- Utilitaires ----------
   const $ = (s) => document.querySelector(s);
@@ -26,8 +26,10 @@
   const joursEntre = (a, b) => Math.round((new Date(a + "T12:00:00") - new Date(b + "T12:00:00")) / 86400000);
   const jourSemaineLundi0 = (s) => (new Date(s + "T12:00:00").getDay() + 6) % 7;
   const dateFr = (s) => new Date(s + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  const dateCourte = (s) => new Date(s + "T12:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
   const nombre = (v, dec = 0) => (typeof v === "number" && isFinite(v)) ? v.toFixed(dec).replace(".", ",") : "–";
   const duree = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const graine = () => new Date().getDate() + new Date().getMonth();
   function mediane(v) { if (!v.length) return null; const a = [...v].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; }
 
   let toastTimer = null;
@@ -35,18 +37,22 @@
     const t = $("#toast");
     t.textContent = msg; t.style.display = "block";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (t.style.display = "none"), 3000);
+    toastTimer = setTimeout(() => (t.style.display = "none"), 3200);
   }
 
   // ---------- État et stockage ----------
+  function progressionInitiale() {
+    return { semaineEvaluee: 0, niveau: 0, deltas: {}, marcheDelta: 0, bilans: [] };
+  }
   function etatVide() {
     return { profil: null, debut: null, etapeTests: false, seances: {}, bilans: {}, sante: {},
-      dernierExport: null, dernierImport: null, majLe: null };
+      progression: progressionInitiale(), voix: false, dernierExport: null, dernierImport: null, majLe: null };
   }
   let S = etatVide();
   let onglet = "accueil";
   let choixSuivi = "fcRepos";
-  let choixProgramme = "semaine";
+  let choixProgramme = "plan";
+  let minuteur = null, tickId = null;
 
   function ouvrirBase() {
     return new Promise((res, rej) => {
@@ -80,6 +86,9 @@
     try { miroir = JSON.parse(localStorage.getItem(MIROIR_LS) || "null"); } catch (e) { /* ignoré */ }
     const candidats = [base, miroir].filter(Boolean).sort((a, b) => (b.majLe || "").localeCompare(a.majLe || ""));
     if (candidats.length) S = Object.assign(etatVide(), candidats[0]);
+    S.progression = Object.assign(progressionInitiale(), S.progression || {});
+    S.progression.deltas = S.progression.deltas || {};
+    S.progression.bilans = S.progression.bilans || [];
   }
   async function sauver() {
     S.majLe = new Date().toISOString();
@@ -88,18 +97,24 @@
     try { localStorage.setItem(MIROIR_LS, JSON.stringify(S)); } catch (e) { /* ignoré */ }
   }
 
-  // ---------- Programme ----------
+  // ---------- Programme et niveau ----------
+  function semaineDe(date) {
+    if (!S.debut) return 1;
+    return Math.min(12, S.progression.niveau + 1);
+  }
   function indexPhase(semaine) {
     const s = Math.min(Math.max(semaine, 1), 12);
     const i = PH().findIndex((p) => p.semaines.includes(s));
     return i < 0 ? PH().length - 1 : i;
   }
-  function semaineDe(date) {
-    if (!S.debut) return 1;
-    return Math.max(1, Math.floor(joursEntre(date, S.debut) / 7) + 1);
+  function seanceFaite(date) { return S.seances[date] && S.seances[date].fait ? S.seances[date] : null; }
+  function seancesValidees() { return Object.keys(S.seances).filter((d) => S.seances[d].fait).sort(); }
+
+  function besoinAllegement(date) {
+    return alertes(date).some((a) => a.categorie === "recup" && a.niveau === "attention");
   }
 
-  // Construit la séance d'une date : blocs successifs, chacun avec ses exercices
+  // Séance d'une date : blocs successifs, charges adaptées à l'historique
   function construireSeance(date) {
     const p = S.profil;
     if (!p || !S.debut || joursEntre(date, S.debut) < 0) return null;
@@ -113,56 +128,92 @@
     const phase = PH()[pi];
     const type = jours.indexOf(idx) % 2 === 0 ? "marche" : "renfo";
     const materiel = p.materiel || [];
+    const allege = besoinAllegement(date);
+    const deltas = S.progression.deltas || {};
 
-    const blocs = [{ titre: "Échauffement", items: [{ id: "mobilite", minutes: 5 }] }];
+    const blocs = [{ titre: "Échauffement", icone: "🔥", items: [{ id: "mobilite", minutes: 5 }] }];
     if (type === "marche") {
-      blocs.push({ titre: "Marche", items: [{ id: "marche", minutes: Math.min(phase.marcheMin, Number(p.minutes) || 20) }] });
+      let minutes = phase.marcheMin + (S.progression.marcheDelta || 0);
+      minutes = Math.min(Number(p.minutes) || 20, Math.max(10, minutes));
+      if (allege) minutes = Math.max(10, Math.round(minutes * 0.7));
+      blocs.push({ titre: "Marche", icone: "👟", items: [{ id: "marche", minutes }] });
     } else {
       const liste = phase.renfo.slice();
       if (materiel.includes("halteres")) liste.push("rowing");
       if (materiel.includes("elastique")) liste.push("tirage");
+      let series = phase.series;
+      if (allege) series = Math.max(1, series - 1);
       blocs.push({
-        titre: "Renforcement",
-        items: liste.map((id) => Object.assign({ id, series: phase.series, repos: EX()[id].reposSec || 60 },
-          window.prescrire(id, pi, p.tests)))
+        titre: "Renforcement", icone: "💪",
+        items: liste.map((id) => Object.assign(
+          { id, series, repos: EX()[id].reposSec || 60 },
+          window.prescrireAdaptatif(id, pi, p.tests, deltas[id] || 0, allege)))
       });
     }
-    blocs.push({ titre: "Retour au calme", items: [{ id: "etirement", minutes: 3 }] });
-    return { date, semaine, phase: phase.nom, type, titre: type === "marche" ? "Marche rapide" : "Renforcement à la maison", blocs };
+    blocs.push({ titre: "Retour au calme", icone: "🧘", items: [{ id: "etirement", minutes: 3 }] });
+    return { date, semaine, phase: phase.nom, phaseIndex: pi, type, allege,
+      titre: type === "marche" ? "Marche rapide" : "Renforcement à la maison", blocs };
   }
 
   function prescriptionTexte(it) {
-    if (it.id === "mobilite" || it.id === "etirement") return `${it.minutes} min`;
-    if (it.id === "marche") return `${it.minutes} min`;
+    if (it.minutes !== undefined) return `${it.minutes} min`;
     const ex = EX()[it.id];
     const quantite = ex.type === "temps" ? `${it.sec} s` : `${it.reps} rép.`;
     return `${it.series} × ${quantite} · repos ${it.repos} s`;
   }
 
-  // ---------- Suivi des séances ----------
-  function seanceFaite(date) { return S.seances[date] && S.seances[date].fait ? S.seances[date] : null; }
-  function suiviItem(date, id, nbSeries) {
-    S.seances[date] = S.seances[date] || {};
-    const s = S.seances[date];
-    s.suivi = s.suivi || {};
-    if (!s.suivi[id]) s.suivi[id] = { faites: [], douleur: 0 };
-    if (nbSeries) while (s.suivi[id].faites.length < nbSeries) s.suivi[id].faites.push(false);
-    return s.suivi[id];
-  }
-  function avancementSeance(date, seance) {
-    let total = 0, fait = 0;
-    seance.blocs.forEach((b) => b.items.forEach((it) => {
-      if (it.series) {
-        total += it.series;
-        const f = (S.seances[date] && S.seances[date].suivi && S.seances[date].suivi[it.id]) || { faites: [] };
-        fait += f.faites.filter(Boolean).length;
-      } else {
-        total += 1;
-        const f = (S.seances[date] && S.seances[date].suivi && S.seances[date].suivi[it.id]) || { faites: [] };
-        if (f.faites[0]) fait += 1;
+  // Statistiques d'une fenêtre de 7 jours, utilisées pour décider de la semaine suivante
+  function statsFenetre(debut) {
+    let prevues = 0, faites = 0, rpeTotal = 0, rpeN = 0, douleurMax = 0, alertesRecup = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = ajouterJours(debut, i);
+      if (construireSeance(d)) prevues++;
+      const s = S.seances[d];
+      if (s && s.fait) {
+        faites++;
+        if (typeof s.rpe === "number") { rpeTotal += s.rpe; rpeN++; }
+        if (typeof s.douleur === "number") douleurMax = Math.max(douleurMax, s.douleur);
+        Object.values(s.suivi || {}).forEach((x) => { if (x.douleur > douleurMax) douleurMax = x.douleur; });
       }
+      const b = S.bilans[d];
+      if (b && typeof b.douleur === "number") douleurMax = Math.max(douleurMax, b.douleur);
+      if (alertes(d).some((a) => a.categorie === "recup" && a.niveau === "attention")) alertesRecup++;
+    }
+    return { prevues, faites, rpeMoyen: rpeN ? rpeTotal / rpeN : null, douleurMax, alertesRecup };
+  }
+
+  // Évalue chaque semaine terminée depuis le dernier passage, puis ajuste le niveau.
+  function avancerProgression() {
+    if (!S.profil || !S.debut) return false;
+    const pr = S.progression;
+    const aujourd = aujourdhui();
+    let change = false;
+    while (joursEntre(aujourd, S.debut) >= 7 * (pr.semaineEvaluee + 1) && pr.semaineEvaluee < 52) {
+      const debutFen = ajouterJours(S.debut, 7 * pr.semaineEvaluee);
+      const stats = statsFenetre(debutFen);
+      const d = window.decideSemaine(stats);
+      if (d.action === "monte") pr.niveau = Math.min(12, pr.niveau + 1);
+      if (d.action === "recule") pr.niveau = Math.max(0, pr.niveau - 1);
+      pr.bilans.unshift({ debut: debutFen, action: d.action, raison: d.raison, niveauApres: pr.niveau,
+        faites: stats.faites, prevues: stats.prevues, rpeMoyen: stats.rpeMoyen });
+      pr.semaineEvaluee++;
+      change = true;
+    }
+    pr.bilans = pr.bilans.slice(0, 26);
+    return change;
+  }
+
+  // Met à jour charges et marche après une séance validée
+  function appliquerSeanceAuProgramme(date, seance, rpe) {
+    const pr = S.progression;
+    const suivi = (S.seances[date] && S.seances[date].suivi) || {};
+    seance.blocs.forEach((b) => b.items.forEach((it) => {
+      if (it.id === "mobilite" || it.id === "etirement") return;
+      if (it.id === "marche") { pr.marcheDelta = window.ajusterMarche(pr.marcheDelta || 0, rpe); return; }
+      const f = suivi[it.id] || { faites: [], douleur: 0 };
+      const reussi = (f.faites || []).filter(Boolean).length >= it.series;
+      pr.deltas[it.id] = window.ajusterDelta(pr.deltas[it.id] || 0, reussi, rpe, f.douleur || 0);
     }));
-    return { total, fait };
   }
 
   // ---------- Santé et alertes ----------
@@ -179,24 +230,21 @@
     const s = S.sante[date] || {};
     const fc = mediane(valeursRecentes("fcRepos", date));
     if (typeof s.fcRepos === "number" && fc !== null && s.fcRepos >= fc + 5)
-      out.push({ niveau: "attention", texte: `FC de repos à ${s.fcRepos} bpm, soit ${Math.round(s.fcRepos - fc)} bpm au-dessus de votre habitude. Préférez une séance facile ou un repos.` });
+      out.push({ categorie: "recup", niveau: "attention", texte: `FC de repos à ${s.fcRepos} bpm, soit ${Math.round(s.fcRepos - fc)} bpm au-dessus de votre habitude. Séance allégée conseillée.` });
     const vfc = mediane(valeursRecentes("vfc", date));
     if (typeof s.vfc === "number" && vfc !== null && s.vfc < 0.8 * vfc)
-      out.push({ niveau: "attention", texte: `Variabilité cardiaque basse : ${Math.round(s.vfc)} ms contre ${Math.round(vfc)} ms habituellement. Récupération à privilégier.` });
+      out.push({ categorie: "recup", niveau: "attention", texte: `Variabilité cardiaque basse : ${Math.round(s.vfc)} ms contre ${Math.round(vfc)} ms habituellement. Récupération à privilégier.` });
     const n1 = (S.sante[date] || {}).sommeil, n2 = (S.sante[ajouterJours(date, -1)] || {}).sommeil;
     if (typeof n1 === "number" && typeof n2 === "number" && n1 < 6 && n2 < 6)
-      out.push({ niveau: "attention", texte: "Deux nuits de moins de 6 h. Réduisez l'intensité aujourd'hui." });
+      out.push({ categorie: "recup", niveau: "attention", texte: "Deux nuits de moins de 6 h. Séance allégée conseillée." });
     const bilan = S.bilans[date];
     if (bilan && typeof bilan.douleur === "number" && bilan.douleur >= 4)
-      out.push({ niveau: "alerte", texte: "Douleur générale signalée à 4/10 ou plus. Arrêtez l'exercice concerné. Si elle dure plus de 48 h, consultez un médecin." });
+      out.push({ categorie: "douleur", niveau: "alerte", texte: "Douleur générale à 4/10 ou plus. Arrêtez l'exercice concerné. Si elle dure plus de 48 h, consultez un médecin." });
     const suivi = (S.seances[date] && S.seances[date].suivi) || {};
     Object.keys(suivi).forEach((id) => {
       if (suivi[id].douleur >= 4 && EX()[id])
-        out.push({ niveau: "alerte", texte: `Douleur à ${EX()[id].nom} : ${suivi[id].douleur}/10. Arrêtez cet exercice et consultez si la gêne persiste.` });
+        out.push({ categorie: "douleur", niveau: "alerte", texte: `Douleur à ${EX()[id].nom} : ${suivi[id].douleur}/10. Arrêtez cet exercice et consultez si la gêne persiste.` });
     });
-    const recentes = Object.keys(S.seances).filter((d) => d <= date && S.seances[d].fait).sort().reverse().slice(0, 3);
-    if (recentes.length === 3 && recentes.every((d) => S.seances[d].rpe >= 8))
-      out.push({ niveau: "attention", texte: "Trois séances de suite très difficiles (8/10 ou plus). Gardez la même charge une semaine avant de progresser." });
     return out;
   }
   function seancesDeLaSemaine(date) {
@@ -207,10 +255,46 @@
     }
     return { prevues, faites };
   }
+  function serieEnCours() {
+    let n = 0, d = aujourdhui();
+    if (!seanceFaite(d)) d = ajouterJours(d, -1);
+    for (let i = 0; i < 30; i++) {
+      const date = ajouterJours(d, -i);
+      if (seanceFaite(date)) n++;
+      else if (construireSeance(date)) break;
+    }
+    return n;
+  }
   function rappelSauvegarde() {
     if (!S.dernierExport) return "Aucune sauvegarde encore. Exportez-en une depuis l'onglet Données.";
     const j = joursEntre(aujourdhui(), iso(S.dernierExport));
     return j >= 7 ? `Dernière sauvegarde il y a ${j} jours. Pensez à exporter.` : "";
+  }
+
+  // ---------- Coach ----------
+  function messageCoach() {
+    const date = aujourdhui();
+    const p = S.profil || {};
+    const g = graine();
+    const seance = construireSeance(date);
+    const faite = seanceFaite(date);
+    if (faite) {
+      if (serieEnCours() >= 3) return COACH.texte("serie_longue", p.prenom, g, { n: serieEnCours() });
+      if (faite.rpe >= 8) return COACH.texte("valide_dur", p.prenom, g);
+      if (faite.douleur >= 4) return COACH.texte("valide_douleur", p.prenom, g);
+      return COACH.texte("valide_facile", p.prenom, g);
+    }
+    const dernier = seancesValidees().slice(-1)[0];
+    if (seance && dernier && joursEntre(date, dernier) >= 4) return COACH.texte("retour", p.prenom, g);
+    if (seance && seance.allege) return COACH.texte("allege", p.prenom, g);
+    if (seance) return COACH.texte(seance.type === "marche" ? "avant_marche" : "avant_renfo", p.prenom, g);
+    return "Jour de repos. Récupérer fait partie du programme. Une marche tranquille si tu te sens bien.";
+  }
+
+  function dernierBilanRecent() {
+    const b = S.progression.bilans[0];
+    if (!b) return null;
+    return joursEntre(aujourdhui(), ajouterJours(b.debut, 6)) <= 7 ? b : null;
   }
 
   // ---------- Import ----------
@@ -268,7 +352,8 @@
         if (!dernierPoids[date] || debut > dernierPoids[date].t) dernierPoids[date] = { t: debut, v: kg };
       } else if (type === "HKCategoryTypeIdentifierSleepAnalysis" && (c[iV] || "").includes("Asleep")) {
         const d1 = dateApple(debut), d2 = dateApple(c[iF]);
-        if (d1 && d2 && d2 > d1) (sommeil[(c[iF] || "").slice(0, 10)] = sommeil[(c[iF] || "").slice(0, 10)] || []).push([d1.getTime(), d2.getTime()]);
+        const jf = (c[iF] || "").slice(0, 10);
+        if (d1 && d2 && d2 > d1) (sommeil[jf] = sommeil[jf] || []).push([d1.getTime(), d2.getTime()]);
       }
     }
     const dates = new Set([...Object.keys(moy), ...Object.keys(dernierPoids), ...Object.keys(sommeil)]);
@@ -322,10 +407,11 @@
     if (d.format !== FORMAT_SAUVEGARDE) throw new Error("Ce fichier n'est pas une sauvegarde de l'application.");
     const { format, ...reste } = d;
     S = Object.assign(etatVide(), reste);
+    S.progression = Object.assign(progressionInitiale(), S.progression || {});
     await sauver();
   }
 
-  // ---------- Schémas de position ----------
+  // ---------- Schémas ----------
   function illustration(pose) {
     const P = window.POSES[pose] || window.POSES.debout;
     const ligne = (pts) => `<polyline points="${pts.map((q) => q.join(",")).join(" ")}"/>`;
@@ -338,7 +424,6 @@
   }
 
   // ---------- Minuteur ----------
-  let minuteur = null, tickId = null;
   function demarrerMinuteur(id, secondes, libelle, auFin) {
     arreterMinuteur();
     minuteur = { id, fin: Date.now() + secondes * 1000, libelle, auFin };
@@ -348,7 +433,6 @@
   function arreterMinuteur() {
     if (tickId) clearInterval(tickId);
     tickId = null; minuteur = null;
-    rendreBarre();
   }
   function tick() {
     if (!minuteur) return;
@@ -373,59 +457,70 @@
   }
 
   // ---------- Actions sur la séance ----------
+  function trouverItem(seance, id) { return seance.blocs.flatMap((b) => b.items).find((i) => i.id === id); }
+  function suiviItem(date, id, nbSeries) {
+    S.seances[date] = S.seances[date] || {};
+    const s = S.seances[date];
+    s.suivi = s.suivi || {};
+    if (!s.suivi[id]) s.suivi[id] = { faites: [], douleur: 0 };
+    if (nbSeries) while (s.suivi[id].faites.length < nbSeries) s.suivi[id].faites.push(false);
+    return s.suivi[id];
+  }
   async function basculerSerie(date, seance, id, index, repos) {
-    const item = seance.blocs.flatMap((b) => b.items).find((i) => i.id === id);
+    const item = trouverItem(seance, id);
     const it = suiviItem(date, id, item.series);
     it.faites[index] = !it.faites[index];
     await sauver();
-    if (it.faites[index] && index < item.series - 1 && repos > 0) {
-      demarrerMinuteur("repos", repos, "Repos", null);
-    } else rendu();
+    if (it.faites[index] && index < item.series - 1 && repos > 0) demarrerMinuteur("repos", repos, "Repos", null);
+    rendu();
   }
-  async function maintien(date, seance, id, index, secondes) {
-    const item = seance.blocs.flatMap((b) => b.items).find((i) => i.id === id);
+  function maintien(date, seance, id, index, secondes) {
+    const item = trouverItem(seance, id);
     const it = suiviItem(date, id, item.series);
-    demarrerMinuteur(id, secondes, `Maintien ${EX()[id].nom}`, async () => {
+    demarrerMinuteur(id, secondes, `Maintien · ${EX()[id].nom}`, async () => {
       it.faites[index] = true;
       await sauver();
       if (index < item.series - 1 && item.repos > 0) demarrerMinuteur("repos", item.repos, "Repos", null);
     });
   }
-  async function bloc(date, seance, id, minutes) {
+  async function basculerBloc(date, id, minutes) {
     const it = suiviItem(date, id, 0);
-    if (!it.faites[0]) {
-      demarrerMinuteur(id, minutes * 60, EX()[id].nom, async () => {
-        it.faites[0] = true;
-        await sauver();
-      });
-    } else {
-      it.faites[0] = false;
+    if (it.faites[0]) { it.faites[0] = false; await sauver(); rendu(); return; }
+    demarrerMinuteur(id, minutes * 60, EX()[id].nom, async () => {
+      it.faites[0] = true;
       await sauver();
-      rendu();
-    }
+    });
   }
   async function douleurItem(date, id, valeur) {
-    const it = suiviItem(date, id, 0);
-    it.douleur = valeur;
+    suiviItem(date, id, 0).douleur = valeur;
     await sauver();
     rendu();
   }
 
-  // ---------- Vues ----------
+  // ---------- En-tête ----------
   function enteteHtml() {
     const h = $("#entete");
-    if (!S.profil) { h.innerHTML = "<h1>Coaching reprise</h1><p>Votre programme sur mesure</p>"; return; }
-    const sem = semaineDe(aujourdhui());
-    h.innerHTML = `<h1>Bonjour ${esc(S.profil.prenom)}</h1><p>Semaine ${Math.min(sem, 12)} sur 12 · ${esc(PH()[indexPhase(sem)].nom)}</p>`;
+    if (!S.profil) { h.innerHTML = `<div class="marque">COACH<span>REPRISE</span></div>`; return; }
+    const niveau = Math.min(12, S.progression.niveau + 1);
+    h.innerHTML = `<div class="marque">COACH<span>REPRISE</span></div>
+      <div class="ligne-en-tete"><span>${esc(S.profil.prenom)}</span><span class="pastille" style="background:${COULEURS_PHASE[indexPhase(niveau)]}">${esc(PH()[indexPhase(niveau)].nom)}</span></div>`;
+  }
+
+  // ---------- Vues ----------
+  function anneau(pct, couleur) {
+    const r = 34, c = 2 * Math.PI * r, off = c * (1 - Math.min(1, pct));
+    return `<svg class="anneau" viewBox="0 0 88 88" aria-hidden="true">
+      <circle cx="44" cy="44" r="${r}" class="anneau-fond"/>
+      <circle cx="44" cy="44" r="${r}" class="anneau-val" style="stroke:${couleur};stroke-dasharray:${c.toFixed(1)};stroke-dashoffset:${off.toFixed(1)}"/></svg>`;
   }
 
   function formulaireProfil(v = {}) {
     const p = Object.assign({ joursSemaine: 3, minutes: 20, materiel: [], objectif: "sante", inactiviteAnnees: 2, debut: aujourdhui() }, v);
     const mat = (k) => (p.materiel || []).includes(k) ? "checked" : "";
     const sel = (n, x) => (String(x) === String(n) ? "selected" : "");
-    return `<div class="carte">
-      <h2 style="margin-top:0">${S.profil ? "Modifier mon profil" : "Bienvenue"}</h2>
-      <p class="muted">Ces réponses servent à construire votre programme. Tout reste sur cet iPhone.</p>
+    return `<div class="carte hero-carte">
+      <h2 class="titre-sport">${S.profil ? "Modifier mon profil" : "Prêt à te lancer ?"}</h2>
+      <p class="muted">Ces réponses personnalisent ton programme. Tout reste sur cet iPhone.</p>
       <form id="formulaire-profil">
         <label for="p-prenom">Prénom</label>
         <input type="text" id="p-prenom" required value="${esc(p.prenom || "")}">
@@ -456,7 +551,7 @@
         <textarea id="p-limitations" placeholder="Ex. : genou gauche sensible, hypertension…">${esc(p.limitations || "")}</textarea>
         <label for="p-debut">Date de début du programme</label>
         <input type="date" id="p-debut" required value="${esc(p.debut)}">
-        <p class="muted">Ce programme ne remplace pas un avis médical. Consultez votre médecin avant de reprendre une activité après une longue pause.</p>
+        <p class="muted">Ce programme ne remplace pas un avis médical. Consulte ton médecin avant de reprendre après une longue pause.</p>
         <div class="ligne" style="margin-top:12px">
           <button type="submit">${S.profil ? "Enregistrer" : "Continuer vers les tests"}</button>
           ${S.profil ? '<button type="button" class="secondaire" data-action="annuler-profil">Annuler</button>' : ""}
@@ -466,10 +561,10 @@
 
   function formulaireTests() {
     const t = (S.profil && S.profil.tests) || {};
-    return `<div class="carte"><h2 style="margin-top:0">Tests de départ</h2>
-      <p class="muted">Quatre mesures simples pour calibrer votre programme sur vos capacités réelles. Faites-les reposé, sans sport intense la veille. Arrêtez à la première douleur ou à la première faute de forme.</p>
+    return `<div class="carte hero-carte"><h2 class="titre-sport">Tests de départ</h2>
+      <p class="muted">Quatre mesures pour calibrer ton programme sur tes capacités réelles. Fais-les reposé, sans sport intense la veille. Arrête à la première douleur ou à la première faute de forme.</p>
       <form id="formulaire-tests">
-        ${window.TESTS_DEPART.map((x) => `<div class="carte" style="margin:10px 0">
+        ${window.TESTS_DEPART.map((x) => `<div class="carte carte-test">
           ${illustration(x.pose)}
           <h3>${esc(x.nom)}</h3>
           <p class="muted">${esc(x.protocole)}</p>
@@ -477,7 +572,7 @@
           <input type="number" min="0" max="999" id="t-${x.id}" value="${t[x.id] ?? ""}">
         </div>`).join("")}
         <div class="ligne"><button type="submit">Enregistrer mes résultats</button>
-        <button type="button" class="secondaire" data-action="passer-tests">Passer pour l'instant</button></div>
+        <button type="button" class="secondaire" data-action="passer-tests">Plus tard</button></div>
       </form></div>`;
   }
 
@@ -487,62 +582,106 @@
     const faite = seanceFaite(date);
     const bilan = S.bilans[date] || {};
     const s = S.sante[date] || {};
+    const niveau = Math.min(12, S.progression.niveau + 1);
+    const prog = S.progression.niveau / 12;
+    const sem = seancesDeLaSemaine(date);
+    const couleur = COULEURS_PHASE[indexPhase(niveau)];
     let html = "";
+
+    html += `<section class="hero">
+      <div class="hero-texte">
+        <p class="hero-petit">Semaine ${niveau} / 12</p>
+        <h2 class="titre-sport">${esc(PH()[indexPhase(niveau)].nom)}</h2>
+        <p class="hero-petit">${esc(serieTexte())}</p>
+      </div>
+      <div class="hero-anneau">${anneau(prog, couleur)}<b>${Math.round(prog * 100)}%</b></div>
+    </section>`;
+
     const rappel = rappelSauvegarde();
     if (rappel) html += `<div class="bandeau">${esc(rappel)} <button class="choix" data-onglet="donnees">Données</button></div>`;
+
+    const bilanRecent = dernierBilanRecent();
+    if (bilanRecent) {
+      html += `<div class="bilan-semaine ${bilanRecent.action}">
+        <b>${esc(ACTIONS_BILAN[bilanRecent.action])}</b> <span>${esc(bilanRecent.raison)}</span></div>`;
+    }
+
+    html += `<section class="coach">
+      <div class="coach-avatar" aria-hidden="true">📣</div>
+      <div class="coach-bulle">
+        <p class="coach-nom">Ton coach</p>
+        <p class="coach-texte">${esc(messageCoach())}</p>
+        <button class="choix" data-action="ecouter-coach">🔊 Écouter</button>
+      </div>
+    </section>`;
+
     alertes(date).forEach((a) => (html += `<div class="alerte ${a.niveau}">${esc(a.texte)}</div>`));
 
-    html += `<div class="carte"><h3>Aujourd'hui · ${esc(dateFr(date))}</h3>`;
     if (!seance) {
-      html += `<p>Jour de repos. Une marche tranquille reste bienvenue si vous vous sentez bien.</p>`;
+      html += `<div class="carte repos-carte"><h3 class="titre-sport">Jour de repos</h3>
+        <p>Récupérer fait partie du programme. Une marche tranquille reste bienvenue.</p></div>`;
     } else {
       const av = avancementSeance(date, seance);
-      html += `<p class="muted">${esc(seance.phase)} · Semaine ${seance.semaine} · ${esc(seance.titre)}</p>
-        <ul class="liste">${seance.blocs.map((b) => `<li><b>${esc(b.titre)}</b> : ${b.items.map((i) => esc(EX()[i.id].nom)).join(", ")}</li>`).join("")}</ul>
-        <p class="muted">Avancement : ${av.fait}/${av.total} série(s) ou bloc(s)</p>`;
-      html += faite
-        ? `<p style="color:var(--ok)">Séance terminée · effort ${faite.rpe}/10</p>`
-        : `<div class="ligne" style="margin-top:8px"><button data-onglet="seance">Ouvrir la séance pas à pas</button></div>`;
+      const pct = av.total ? av.fait / av.total : 0;
+      html += `<section class="carte seance-carte">
+        <div class="ligne" style="justify-content:space-between">
+          <h3 class="titre-sport">${esc(seance.titre)}</h3>
+          ${seance.allege ? '<span class="badge badge-alerte">Allégée</span>' : `<span class="badge" style="background:${couleur}">${esc(seance.phase)}</span>`}
+        </div>
+        <div class="barre"><span style="width:${Math.round(pct * 100)}%"></span></div>
+        <p class="muted">${av.fait}/${av.total} série(s) ou bloc(s) faits</p>
+        <ul class="liste-blocs">${seance.blocs.map((b) => `<li>${b.icone} <b>${esc(b.titre)}</b> · ${b.items.map((i) => esc(EX()[i.id].nom)).join(", ")}</li>`).join("")}</ul>
+        ${faite
+          ? `<p class="succes">✓ Séance terminée · effort ${faite.rpe}/10</p>`
+          : `<button class="grand" data-onglet="seance">${av.fait ? "Reprendre la séance" : "Lancer la séance"}</button>`}
+      </section>`;
     }
-    html += `<p class="muted">Cette semaine : ${seancesDeLaSemaine(date).faites} séance(s) faite(s) sur ${seancesDeLaSemaine(date).prevues} prévue(s).</p></div>`;
+    html += `<p class="muted centre">Cette semaine : ${sem.faites} séance(s) sur ${sem.prevues} prévue(s)</p>`;
 
-    html += `<div class="carte"><h3>Comment vous sentez-vous ?</h3>
-      ${bilanBouton("sommeil", "Sommeil ressenti (1 = mauvais, 5 = excellent)", bilan.sommeil, 5)}
-      ${bilanBouton("energie", "Énergie (1 = faible, 5 = forte)", bilan.energie, 5)}
-      ${bilanBouton("douleur", "Douleur générale (0 = aucune)", bilan.douleur, 10, true)}
+    html += `<div class="carte"><h3 class="titre-sport petit">Comment tu te sens ?</h3>
+      ${bilanBouton("sommeil", "Sommeil ressenti (1 mauvais · 5 excellent)", bilan.sommeil, 5)}
+      ${bilanBouton("energie", "Énergie (1 faible · 5 forte)", bilan.energie, 5)}
+      ${bilanBouton("douleur", "Douleur générale (0 aucune)", bilan.douleur, 10, true)}
     </div>`;
+
     if (Object.keys(s).length) {
-      html += `<div class="carte"><h3>Mesures importées</h3><div class="grille">
-        ${stat("FC repos", nombre(s.fcRepos), "bpm")}${stat("VFC", nombre(s.vfc), "ms")}
-        ${stat("Sommeil", nombre(s.sommeil, 1), "h")}${stat("Poids", nombre(s.poids, 1), "kg")}
-        ${stat("Pas", nombre(s.pas), "")}${stat("SpO₂", nombre(s.spo2), "%")}</div></div>`;
+      html += `<div class="carte"><h3 class="titre-sport petit">Mesures importées</h3><div class="grille">
+        ${stat("FC repos", nombre(s.fcRepos), "bpm", "rouge")}${stat("VFC", nombre(s.vfc), "ms", "vert")}
+        ${stat("Sommeil", nombre(s.sommeil, 1), "h", "bleu")}${stat("Poids", nombre(s.poids, 1), "kg", "orange")}
+        ${stat("Pas", nombre(s.pas), "", "lime")}${stat("SpO₂", nombre(s.spo2), "%", "teal")}</div></div>`;
     } else {
-      html += `<p class="muted">Aucune mesure importée pour aujourd'hui. Importez votre fichier depuis l'onglet Données.</p>`;
+      html += `<p class="muted centre">Aucune mesure importée aujourd'hui. Importez votre fichier depuis Données.</p>`;
     }
     return html;
+  }
+  function serieTexte() {
+    const n = serieEnCours();
+    return n >= 2 ? `🔥 ${n} séances d'affilée` : (n === 1 ? "1 séance validée d'affilée" : "Prêt pour la première séance");
   }
 
   function vueSeance() {
     const date = aujourdhui();
     const seance = construireSeance(date);
     if (!seance) {
-      return `<div class="carte"><h3>Pas de séance aujourd'hui</h3>
-        <p>Consultez le programme pour voir les prochaines séances.</p>
+      return `<div class="carte repos-carte"><h3 class="titre-sport">Pas de séance aujourd'hui</h3>
+        <p>Le programme t'attend au prochain jour d'entraînement.</p>
         <button data-onglet="programme">Voir le programme</button></div>`;
     }
     const faite = seanceFaite(date);
     const av = avancementSeance(date, seance);
     let html = `<div class="ligne"><button class="secondaire" data-onglet="accueil">← Retour</button></div>
-      <h2>${esc(seance.titre)}</h2>
-      <p class="muted">Semaine ${seance.semaine} · ${esc(seance.phase)} · ${av.fait}/${av.total} fait(s)</p>`;
+      <h2 class="titre-sport">${esc(seance.titre)}</h2>
+      <p class="muted">Semaine ${seance.semaine} · ${esc(seance.phase)} · ${av.fait}/${av.total} fait(s)</p>
+      <div class="barre"><span style="width:${av.total ? Math.round((av.fait / av.total) * 100) : 0}%"></span></div>`;
+    if (seance.allege) html += `<div class="bandeau">Séance allégée aujourd'hui : ta récupération le demande. C'est un bon choix.</div>`;
     seance.blocs.forEach((b) => {
-      html += `<h3 style="margin-top:18px">${esc(b.titre)}</h3>`;
+      html += `<h3 class="titre-bloc">${b.icone} ${esc(b.titre)}</h3>`;
       b.items.forEach((it) => (html += carteExercice(date, it)));
     });
     html += faite
-      ? `<div class="carte"><p style="color:var(--ok)">Séance validée · effort ${faite.rpe}/10</p>
+      ? `<div class="carte"><p class="succes">✓ Séance validée · effort ${faite.rpe}/10</p>
           <button class="secondaire" data-action="annuler-validation">Rouvrir la séance</button></div>`
-      : `<div class="carte"><h3>Fin de séance</h3>
+      : `<div class="carte"><h3 class="titre-sport petit">Fin de séance</h3>
           <div class="grille">
             <div><label for="rpe">Effort ressenti (1 à 10)</label>
               <select id="rpe">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option value="${n}" ${n === 5 ? "selected" : ""}>${n}</option>`).join("")}</select></div>
@@ -551,35 +690,35 @@
           </div>
           <label for="note">Note (facultatif)</label>
           <textarea id="note" placeholder="Comment ça s'est passé ?"></textarea>
-          <div class="ligne" style="margin-top:10px"><button data-action="valider-seance">Valider la séance</button></div></div>`;
+          <div class="ligne" style="margin-top:10px"><button class="grand" data-action="valider-seance">Valider la séance</button></div></div>`;
     return html;
   }
 
   function carteExercice(date, it) {
     const ex = EX()[it.id];
     const suivi = (S.seances[date] && S.seances[date].suivi && S.seances[date].suivi[it.id]) || { faites: [], douleur: 0 };
-    let pied = "";
+    let pied;
     if (ex.type === "bloc") {
       const fait = suivi.faites[0];
-      pied = `<div class="ligne"><button data-bloc="${it.id}" data-min="${it.minutes}">${fait ? "Annuler" : `Démarrer le minuteur · ${it.minutes} min`}</button>${fait ? '<span style="color:var(--ok)">✓ Fait</span>' : ""}</div>`;
+      pied = `<div class="ligne"><button class="${fait ? "secondaire" : ""}" data-bloc="${it.id}" data-min="${it.minutes}">${fait ? "✓ Fait · annuler" : `Minuteur · ${it.minutes} min`}</button></div>`;
     } else {
       const lignes = [];
       for (let i = 0; i < it.series; i++) {
         const ok = suivi.faites[i];
         if (ex.type === "temps") {
-          lignes.push(`<div class="ligne" style="margin:6px 0"><span>Série ${i + 1} · ${it.sec} s</span>
-            ${ok ? '<span style="color:var(--ok)">✓</span>' : `<button class="choix" data-maintien="${it.id}" data-i="${i}" data-sec="${it.sec}">Démarrer ${it.sec} s</button>`}
-            ${ok ? `<button class="choix" data-serie="${it.id}" data-i="${i}" data-repos="${it.repos}">Annuler</button>` : ""}</div>`);
+          lignes.push(`<div class="serie-ligne ${ok ? "ok" : ""}"><span>Série ${i + 1} · ${it.sec} s</span>
+            ${ok ? `<button class="choix" data-serie="${it.id}" data-i="${i}" data-repos="${it.repos}">Annuler</button>`
+              : `<button class="choix actif" data-maintien="${it.id}" data-i="${i}" data-sec="${it.sec}">▶ Lancer ${it.sec} s</button>`}</div>`);
         } else {
-          lignes.push(`<button class="choix ${ok ? "actif" : ""}" data-serie="${it.id}" data-i="${i}" data-repos="${it.repos}">Série ${i + 1} · ${it.reps} rép. ${ok ? "✓" : ""}</button>`);
+          lignes.push(`<button class="serie ${ok ? "ok" : ""}" data-serie="${it.id}" data-i="${i}" data-repos="${it.repos}">Série ${i + 1}<small>${it.reps} rép.</small>${ok ? "✓" : ""}</button>`);
         }
       }
-      pied = `<div class="${ex.type === "temps" ? "" : "ligne"}">${lignes.join("")}</div>
-        <p class="muted" style="margin-top:6px">Repos entre les séries : ${it.repos} s</p>`;
+      pied = ex.type === "temps" ? lignes.join("") : `<div class="series">${lignes.join("")}</div>`;
+      pied += `<p class="muted petit-texte">Repos entre séries : ${it.repos} s</p>`;
     }
     const video = ex.video ? `<p><a href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Voir la vidéo de démonstration</a></p>` : "";
     return `<article class="carte exo">
-      <div class="ligne" style="justify-content:space-between"><h3>${esc(ex.nom)}</h3><span class="badge">${esc(it.minutes ? it.minutes + " min" : prescriptionTexte(it))}</span></div>
+      <div class="ligne" style="justify-content:space-between"><h3>${esc(ex.nom)}</h3><span class="badge">${esc(prescriptionTexte(it))}</span></div>
       ${illustration(ex.pose)}
       <p>${esc(ex.description)}</p>
       <details><summary>Comment faire, pas à pas</summary>
@@ -591,11 +730,22 @@
         <p><b>Plus difficile :</b> ${esc(ex.variantes.difficile)}</p>
       </details>
       ${video}
-      <p class="muted">${esc(ex.securite)}</p>
+      <p class="muted petit-texte">${esc(ex.securite)}</p>
       ${pied}
-      <div class="ligne" style="margin-top:10px"><label style="margin:0">Douleur pendant cet exercice</label>
+      <div class="ligne" style="margin-top:10px"><label style="margin:0">Douleur sur cet exercice</label>
         <select data-douleur="${it.id}" style="width:auto">${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option value="${n}" ${n === suivi.douleur ? "selected" : ""}>${n}</option>`).join("")}</select></div>
     </article>`;
+  }
+
+  function avancementSeance(date, seance) {
+    let total = 0, fait = 0;
+    const suivi = (S.seances[date] && S.seances[date].suivi) || {};
+    seance.blocs.forEach((b) => b.items.forEach((it) => {
+      const f = suivi[it.id] || { faites: [] };
+      if (it.series) { total += it.series; fait += f.faites.filter(Boolean).length; }
+      else { total += 1; if (f.faites[0]) fait += 1; }
+    }));
+    return { total, fait };
   }
 
   function bilanBouton(champ, titre, actuel, max, zeroPossible = false) {
@@ -604,31 +754,27 @@
       boutons.push(`<button class="choix ${actuel === i ? "actif" : ""}" data-bilan="${champ}" data-val="${i}">${i}</button>`);
     return `<p class="muted" style="margin:10px 0 4px">${esc(titre)}</p><div class="ligne">${boutons.join("")}</div>`;
   }
-  function stat(titre, valeur, unite) {
-    return `<div class="stat"><b>${esc(valeur)} ${esc(unite)}</b><span>${esc(titre)}</span></div>`;
+  function stat(titre, valeur, unite, teinte = "lime") {
+    return `<div class="stat stat-${teinte}"><b>${esc(valeur)} <small>${esc(unite)}</small></b><span>${esc(titre)}</span></div>`;
   }
 
   function vueProgramme() {
-    const actuelle = semaineDe(aujourdhui());
-    let html = `<div class="ligne" style="margin-bottom:6px">
-      <button class="choix ${choixProgramme === "semaine" ? "actif" : ""}" data-prog="semaine">Plan 12 semaines</button>
-      <button class="choix ${choixProgramme === "bibliotheque" ? "actif" : ""}" data-prog="bibliotheque">Bibliothèque d'exercices</button>
-      <button class="choix ${choixProgramme === "tests" ? "actif" : ""}" data-prog="tests">Tests de départ</button></div>`;
-    if (choixProgramme === "semaine") {
-      html += `<div class="carte"><table><tr><th>Sem.</th><th>Phase</th><th>Séances</th></tr>`;
-      PH().forEach((p, i) => p.semaines.forEach((n) => {
-        html += `<tr class="${n === actuelle ? "actuelle" : ""}"><td>${n}</td><td>${esc(p.nom)}</td><td>${p.renfo.map((id) => esc(EX()[id].nom)).join(", ")}</td></tr>`;
-      }));
-      html += `</table><p class="muted">Charges calibrées sur vos tests de départ. Elles augmentent à chaque phase. Les blocs marche et étirements sont communs à toutes les séances.</p></div>`;
-      const seance = construireSeance(aujourdhui()) || construireSeance(prochaineSeance());
-      if (seance) {
-        html += `<div class="carte"><h3>Prochaine séance type : ${esc(seance.titre)}</h3>`;
-        seance.blocs.forEach((b) => {
-          html += `<h3 style="font-size:15px;margin-top:10px">${esc(b.titre)}</h3><ul class="liste">${b.items.map((i) => `<li>${esc(EX()[i.id].nom)} · ${esc(prescriptionTexte(i))}</li>`).join("")}</ul>`;
-        });
-        html += `</div>`;
-      }
-    } else if (choixProgramme === "bibliotheque") {
+    const actuelle = Math.min(12, S.progression.niveau + 1);
+    let html = `<div class="onglets-sous">
+      <button class="choix ${choixProgramme === "plan" ? "actif" : ""}" data-prog="plan">Plan 12 semaines</button>
+      <button class="choix ${choixProgramme === "biblio" ? "actif" : ""}" data-prog="biblio">Exercices</button>
+      <button class="choix ${choixProgramme === "tests" ? "actif" : ""}" data-prog="tests">Tests</button></div>`;
+    if (choixProgramme === "plan") {
+      html += `<div class="carte"><p class="muted">Ton programme s'adapte chaque semaine à tes séances, tes efforts et tes douleurs. Tu n'avances que si ton corps suit.</p>`;
+      PH().forEach((p, i) => {
+        const debut = p.semaines[0], fin = p.semaines[p.semaines.length - 1];
+        const actif = actuelle >= debut && actuelle <= fin;
+        html += `<div class="phase ${actif ? "phase-actuelle" : ""}" style="border-color:${COULEURS_PHASE[i]}">
+          <div class="ligne" style="justify-content:space-between"><b>${esc(p.nom)}</b><span class="badge" style="background:${COULEURS_PHASE[i]}">Sem. ${debut}–${fin}</span></div>
+          <p class="muted petit-texte">${p.renfo.map((id) => esc(EX()[id].nom)).join(" · ")}</p></div>`;
+      });
+      html += `</div>`;
+    } else if (choixProgramme === "biblio") {
       html += Object.keys(EX()).map((id) => {
         const ex = EX()[id];
         return `<details class="carte"><summary><b>${esc(ex.nom)}</b> <span class="muted">· ${esc(ex.objectif)}</span></summary>
@@ -647,27 +793,50 @@
       }).join("");
     } else {
       const t = (S.profil && S.profil.tests) || {};
-      html += `<div class="carte"><h3>Vos résultats de départ</h3>
-        <table>${window.TESTS_DEPART.map((x) => `<tr><td>${esc(x.nom)}</td><td>${t[x.id] ?? "non fait"} ${esc(x.unite)}</td></tr>`).join("")}</table>
-        <div class="ligne" style="margin-top:12px"><button data-action="refaire-tests">Refaire les tests</button></div>
-        <p class="muted">Refaire les tests recalcule les charges à partir de la prochaine séance.</p></div>`;
+      html += `<div class="carte"><h3 class="titre-sport petit">Tes résultats de départ</h3>
+        <table>${window.TESTS_DEPART.map((x) => `<tr><td>${esc(x.nom)}</td><td><b>${t[x.id] ?? "non fait"}</b> ${esc(x.unite)}</td></tr>`).join("")}</table>
+        <div class="ligne" style="margin-top:12px"><button data-action="refaire-tests">Refaire les tests</button></div></div>`;
     }
     return html;
   }
-  function prochaineSeance() {
-    for (let i = 1; i <= 14; i++) { const d = ajouterJours(aujourdhui(), i); if (construireSeance(d)) return d; }
-    return aujourdhui();
-  }
 
+  function vueSuivi() {
+    const validees = seancesValidees();
+    const recents = validees.slice(-14).map((d) => S.seances[d].rpe).filter((n) => typeof n === "number");
+    const rpe = recents.length ? recents.reduce((a, b) => a + b, 0) / recents.length : null;
+    const pr = S.progression;
+    let html = `<div class="grille">${stat("Séances validées", String(validees.length), "", "orange")}${stat("Effort moyen (14 dernières)", nombre(rpe, 1), "/10", "rouge")}</div>
+      <div class="onglets-sous">${Object.keys(GRAPHIQUES).map((k) => `<button class="choix ${choixSuivi === k ? "actif" : ""}" data-suivi="${k}">${esc(GRAPHIQUES[k].titre)}</button>`).join("")}</div>
+      <div class="carte"><h3 class="titre-sport petit">${esc(GRAPHIQUES[choixSuivi].titre)} · 60 jours</h3>${graphique(choixSuivi)}</div>`;
+
+    html += `<div class="carte"><h3 class="titre-sport petit">Ma progression</h3>`;
+    if (!pr.bilans.length) {
+      html += `<p class="muted">Le premier bilan apparaîtra à la fin de ta première semaine.</p>`;
+    } else {
+      html += pr.bilans.map((b) => `<div class="bilan-ligne ${b.action}">
+        <div class="ligne" style="justify-content:space-between"><b>${esc(ACTIONS_BILAN[b.action])}</b><span class="muted petit-texte">semaine du ${esc(dateCourte(b.debut))}</span></div>
+        <p class="petit-texte">${esc(b.raison)}</p>
+        <p class="muted petit-texte">${b.faites}/${b.prevues} séances · niveau ${b.niveauApres + 1}</p></div>`).join("");
+    }
+    const ajustements = Object.keys(pr.deltas).filter((id) => pr.deltas[id] !== 0 && EX()[id]);
+    if (ajustements.length) {
+      html += `<h3 class="titre-sport petit" style="margin-top:14px">Charges personnalisées</h3><ul class="liste">${ajustements.map((id) => {
+        const d = pr.deltas[id], unite = EX()[id].type === "temps" ? "s" : "rép.";
+        return `<li>${esc(EX()[id].nom)} : ${d > 0 ? "+" : ""}${d * (EX()[id].type === "temps" ? 5 : 1)} ${unite}</li>`;
+      }).join("")}</ul>`;
+    }
+    if (pr.marcheDelta) html += `<p class="muted petit-texte">Marche : ${pr.marcheDelta > 0 ? "+" : ""}${pr.marcheDelta} min par rapport au plan.</p>`;
+    html += `</div>`;
+    return html;
+  }
   function graphique(champ) {
     const { unite, decimales, titre } = GRAPHIQUES[champ];
     const jours = 60, fin = aujourdhui(), pts = [];
     for (let i = jours - 1; i >= 0; i--) {
-      const d = ajouterJours(fin, -i);
-      const v = (S.sante[d] || {})[champ];
+      const v = (S.sante[ajouterJours(fin, -i)] || {})[champ];
       if (typeof v === "number") pts.push({ x: jours - 1 - i, v });
     }
-    if (pts.length < 2) return `<p class="muted">Pas assez de données sur ${jours} jours. Importez vos mesures depuis l'onglet Données.</p>`;
+    if (pts.length < 2) return `<p class="muted">Pas assez de données sur ${jours} jours. Importez vos mesures depuis Données.</p>`;
     const W = 320, H = 150, P = 12;
     const min = Math.min(...pts.map((p) => p.v)), max = Math.max(...pts.map((p) => p.v));
     const etendue = (max - min) || 1;
@@ -676,39 +845,35 @@
     const moy7 = recents.length ? recents.reduce((a, b) => a + b, 0) / recents.length : null;
     return `<svg class="graph" viewBox="0 0 ${W} ${H}" role="img" aria-label="Graphique ${esc(titre)}">
         <line class="axe" x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}"/><polyline points="${coords}"/></svg>
-      <div class="grille" style="margin-top:8px">${stat("Dernière valeur", nombre(pts[pts.length - 1].v, decimales), unite)}${stat("Moyenne 7 jours", nombre(moy7, decimales), unite)}</div>
-      <p class="muted">Min ${nombre(min, decimales)} · Max ${nombre(max, decimales)} ${esc(unite)} sur 60 jours.</p>`;
-  }
-  function vueSuivi() {
-    const faites = Object.keys(S.seances).filter((d) => S.seances[d].fait).sort();
-    const recents = faites.slice(-14).map((d) => S.seances[d].rpe).filter((n) => typeof n === "number");
-    const rpe = recents.length ? recents.reduce((a, b) => a + b, 0) / recents.length : null;
-    return `<div class="carte"><div class="grille">${stat("Séances validées", String(faites.length), "")}${stat("Effort moyen (14 dernières)", nombre(rpe, 1), "/10")}</div></div>
-      <div class="ligne">${Object.keys(GRAPHIQUES).map((k) => `<button class="choix ${choixSuivi === k ? "actif" : ""}" data-suivi="${k}">${esc(GRAPHIQUES[k].titre)}</button>`).join("")}</div>
-      <div class="carte"><h3>${esc(GRAPHIQUES[choixSuivi].titre)} · 60 jours</h3>${graphique(choixSuivi)}</div>`;
+      <div class="grille" style="margin-top:8px">${stat("Dernière valeur", nombre(pts[pts.length - 1].v, decimales), unite, "lime")}${stat("Moyenne 7 jours", nombre(moy7, decimales), unite, "bleu")}</div>
+      <p class="muted petit-texte">Min ${nombre(min, decimales)} · Max ${nombre(max, decimales)} ${esc(unite)} sur 60 jours.</p>`;
   }
 
   function vueDonnees() {
     const f = (d) => (d ? new Date(d).toLocaleString("fr-FR") : "jamais");
     return `
-      <div class="carte"><h3>Importer mes mesures</h3>
-        <p class="muted">CSV du raccourci Santé (une ligne par jour) ou CSV de l'export Apple Santé. Les jours déjà présents sont mis à jour, rien n'est dupliqué.</p>
+      <div class="carte"><h3 class="titre-sport petit">Coach vocal</h3>
+        <p class="muted">Le coach peut lire ses messages à voix haute avec la voix française de ton iPhone.</p>
+        <div class="ligne"><button class="${S.voix ? "secondaire" : ""}" data-action="voix">${S.voix ? "Désactiver la voix" : "Activer la voix du coach"}</button></div></div>
+      <div class="carte"><h3 class="titre-sport petit">Importer mes mesures</h3>
+        <p class="muted">CSV du raccourci Santé (une ligne par jour) ou CSV de l'export Apple Santé. Rien n'est dupliqué.</p>
         <div class="ligne"><button data-action="choisir-csv">Importer un CSV</button></div>
-        <p class="muted">Dernier import : ${esc(f(S.dernierImport))} · ${Object.keys(S.sante).length} jour(s) de mesures</p></div>
-      <div class="carte"><h3>Sauvegarde</h3>
-        <p class="muted">Exportez une sauvegarde et enregistrez-la dans Fichiers (iCloud Drive) : elle permet de tout restaurer.</p>
-        <div class="ligne"><button data-action="exporter">Exporter une sauvegarde</button><button class="secondaire" data-action="restaurer">Restaurer</button></div>
+        <p class="muted">Dernier import : ${esc(f(S.dernierImport))} · ${Object.keys(S.sante).length} jour(s)</p></div>
+      <div class="carte"><h3 class="titre-sport petit">Sauvegarde</h3>
+        <p class="muted">Exporte une sauvegarde et enregistre-la dans Fichiers (iCloud Drive) : elle permet de tout restaurer.</p>
+        <div class="ligne"><button data-action="exporter">Exporter</button><button class="secondaire" data-action="restaurer">Restaurer</button></div>
         <p class="muted">Dernier export : ${esc(f(S.dernierExport))}</p></div>
-      <div class="carte"><h3>Profil</h3>
+      <div class="carte"><h3 class="titre-sport petit">Profil</h3>
         <div class="ligne"><button class="secondaire" data-action="modifier-profil">Modifier mon profil</button></div></div>
-      <div class="carte"><h3>Zone de danger</h3>
-        <p class="muted">Efface toutes les données de cet appareil. Exportez une sauvegarde avant.</p>
+      <div class="carte"><h3 class="titre-sport petit">Zone de danger</h3>
+        <p class="muted">Efface toutes les données de cet appareil. Exporte une sauvegarde avant.</p>
         <button class="danger" data-action="effacer">Tout effacer</button></div>`;
   }
 
   const VUES = { accueil: vueAccueil, seance: vueSeance, programme: vueProgramme, suivi: vueSuivi, donnees: vueDonnees };
 
   function rendu() {
+    if (S.profil && avancerProgression()) sauver();
     enteteHtml();
     const nav = $("#navigation");
     nav.classList.toggle("hidden", !S.profil || S.etapeTests);
@@ -734,29 +899,27 @@
       }
       if (b.dataset.suivi) { choixSuivi = b.dataset.suivi; rendu(); return; }
       if (b.dataset.serie && seance) return basculerSerie(date, seance, b.dataset.serie, Number(b.dataset.i), Number(b.dataset.repos));
-      if (b.dataset.maintien && seance) return maintien(date, seance, b.dataset.maintien, Number(b.dataset.i), Number(b.dataset.sec));
-      if (b.dataset.bloc && seance) return bloc(date, seance, b.dataset.bloc, Number(b.dataset.min));
+      if (b.dataset.maintien && seance) { maintien(date, seance, b.dataset.maintien, Number(b.dataset.i), Number(b.dataset.sec)); return rendu(); }
+      if (b.dataset.bloc) return basculerBloc(date, b.dataset.bloc, Number(b.dataset.min));
       switch (b.dataset.action) {
-        case "valider-seance": {
-          S.seances[date] = Object.assign({}, S.seances[date], {
-            fait: true, rpe: Number($("#rpe").value), douleur: Number($("#douleur-seance").value),
-            note: ($("#note").value || "").trim(), quand: new Date().toISOString()
-          });
-          await sauver(); toast("Séance validée. Bravo !"); rendu(); return;
-        }
+        case "valider-seance": return validerSeance(date, seance);
         case "annuler-validation":
           S.seances[date] = Object.assign({}, S.seances[date], { fait: false });
           await sauver(); rendu(); return;
         case "passer-minuteur": arreterMinuteur(); rendu(); return;
+        case "ecouter-coach": COACH.parler(messageCoach(), true); return;
+        case "voix":
+          S.voix = !S.voix; await sauver();
+          COACH.parler(`Salut ${S.profil ? S.profil.prenom : ""}, je suis ton coach. On y va ?`, S.voix);
+          toast(S.voix ? "Voix activée" : "Voix désactivée");
+          rendu(); return;
         case "exporter": return exporterSauvegarde();
         case "restaurer": return $("#fichier-json").click();
         case "choisir-csv": return $("#fichier-csv").click();
         case "modifier-profil":
-          $("#contenu").innerHTML = formulaireProfil(Object.assign({}, S.profil, { debut: S.debut }));
-          return;
+          $("#contenu").innerHTML = formulaireProfil(Object.assign({}, S.profil, { debut: S.debut })); return;
         case "annuler-profil": return rendu();
-        case "refaire-tests":
-          S.etapeTests = true; await sauver(); rendu(); return;
+        case "refaire-tests": S.etapeTests = true; await sauver(); rendu(); return;
         case "passer-tests":
           S.profil.tests = S.profil.tests || {};
           S.etapeTests = false; await sauver(); toast("Valeurs par défaut utilisées."); rendu(); return;
@@ -789,6 +952,24 @@
     }));
   }
 
+  async function validerSeance(date, seance) {
+    if (!seance) return;
+    const rpe = Number($("#rpe").value);
+    S.seances[date] = Object.assign({}, S.seances[date], {
+      fait: true, rpe, douleur: Number($("#douleur-seance").value),
+      note: ($("#note").value || "").trim(), quand: new Date().toISOString()
+    });
+    if (!S.seances[date].adapte) {
+      appliquerSeanceAuProgramme(date, seance, rpe);
+      S.seances[date].adapte = true;
+    }
+    await sauver();
+    const texte = messageCoach();
+    toast(texte);
+    COACH.parler(texte, S.voix);
+    rendu();
+  }
+
   async function lireFichier(input, traitement) {
     const f = input.files && input.files[0];
     input.value = "";
@@ -808,11 +989,13 @@
       joursSemaine: Number($("#p-jours").value), minutes: Number($("#p-minutes").value),
       materiel, limitations: $("#p-limitations").value.trim()
     });
+    const debutAvant = S.debut;
     S.debut = $("#p-debut").value || aujourdhui();
+    if (premiere || debutAvant !== S.debut) S.progression = progressionInitiale();
     if (premiere || !S.profil.tests) S.etapeTests = true;
     await sauver();
     onglet = "accueil";
-    toast(S.etapeTests ? "Profil enregistré. Faites maintenant les tests de départ." : "Profil enregistré.");
+    toast(S.etapeTests ? "Profil enregistré. Lance maintenant les tests de départ." : "Profil enregistré.");
     rendu();
   }
 
@@ -825,7 +1008,7 @@
     S.profil.tests = tests;
     S.etapeTests = false;
     await sauver();
-    toast("Tests enregistrés. Votre programme est calibré.");
+    toast("Tests enregistrés. Ton programme est calibré.");
     rendu();
   }
 

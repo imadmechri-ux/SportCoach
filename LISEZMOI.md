@@ -61,3 +61,9 @@ Ces alertes donnent des conseils de prudence. Elles ne remplacent pas un avis m�
 - **Suivi exercice par exercice** : cochez chaque série, lancez le minuteur de repos ou de maintien, notez la douleur de l'exercice.
 - **Programme → Bibliothèque** : les 17 exercices avec leurs fiches complètes.
 - Les schémas sont des représentations indicatives. Un lien vidéo peut être ajouté à chaque exercice dans `exercices.js` (champ `video`).
+
+## 8. Programme adaptatif et coach (version 3)
+- **Adaptation hebdomadaire** : chaque semaine terminée est évaluée (séances faites, effort ressenti, douleurs, récupération). Le niveau monte, se maintient ou recule. Le bilan de chaque semaine est visible dans Suivi → Ma progression.
+- **Charges personnalisées** : après chaque séance bien maîtrisée, les répétitions ou secondes d'un exercice augmentent ; après une séance trop dure ou une douleur, elles diminuent.
+- **Séance allégée** automatique quand la récupération est mauvaise (FC de repos, VFC, sommeil).
+- **Coach** : messages encourageants sur l'écran d'accueil. Activez la voix dans Données (voix française du téléphone).

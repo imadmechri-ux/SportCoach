@@ -2,7 +2,7 @@
 // Stratégie "réseau d'abord" : chaque mise à jour arrive dès que l'iPhone est connecté,
 // et le cache sert seulement si le réseau est absent. Aucune donnée personnelle n'est mise en cache.
 const VERSION = "coaching-v4";
-const FICHIERS = ["./", "./index.html", "./app.js", "./exercices.js", "./programme.js", "./adaptation.js", "./coach.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
+const FICHIERS = ["./", "./index.html", "./app.js", "./exercices.js", "./programme.js", "./adaptation.js", "./coach.js", "./manifest.webmanifest", "./icons/icon-192.png?v=2", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FICHIERS)));

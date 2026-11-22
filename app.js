@@ -451,7 +451,7 @@
   function carteMusique(seance) {
     const cles = ["echauffement", seance.type === "marche" ? "marche" : "renfo", "retour"];
     return `<div class="carte musique"><h3 class="titre-sport petit">🎧 Musique de la séance</h3>
-      <div class="ligne">${cles.map((c) => `<a class="bouton-lien" href="${lienSpotify(MUSIQUE[c].requete)}" target="_blank" rel="noopener">${esc(MUSIQUE[c].titre)}</a>`).join("")}</div>
+      <div class="ligne">${cles.map((c) => `<a class="bouton-lien" href="${lienSpotify(MUSIQUE[c].requete)}" target="_blank" rel="noopener">▶ Spotify · ${esc(MUSIQUE[c].titre)}</a>`).join("")}</div>
       <p class="muted petit-texte">Ouvre Spotify sur une recherche. Rien n'est lu automatiquement.</p></div>`;
   }
 
@@ -666,7 +666,8 @@
         ${faite
           ? `<p class="succes">✓ Séance terminée · effort ${faite.rpe}/10</p>`
           : `<button class="grand" data-onglet="seance">${av.fait ? "Reprendre la séance" : "Lancer la séance"}</button>`}
-      </section>`;
+      </section>
+      ${carteMusique(seance)}`;
     }
     html += `<p class="muted centre">Cette semaine : ${sem.faites} séance(s) sur ${sem.prevues} prévue(s)</p>`;
 

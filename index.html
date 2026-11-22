@@ -82,11 +82,24 @@ svg.graph { width: 100%; height: auto; display: block; margin-top: 8px; }
 svg.graph polyline { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
 svg.graph line.axe { stroke: var(--bord); stroke-width: 1; }
 .hidden { display: none !important; }
+svg.pose { width: 100%; max-width: 240px; height: auto; display: block; margin: 8px auto; color: var(--texte); }
+svg.pose polyline { fill: none; stroke: currentColor; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+svg.pose .tete { fill: none; stroke: currentColor; stroke-width: 5; }
+svg.pose .sol { stroke: var(--bord); stroke-width: 3; }
+.exo { padding-bottom: 12px; }
+.badge { background: var(--fond); border: 1px solid var(--bord); border-radius: 999px; padding: 4px 10px; font-size: 13px; color: var(--accent); white-space: nowrap; }
+details { margin-top: 8px; }
+details summary { cursor: pointer; color: var(--accent); font-weight: 600; min-height: 36px; display: flex; align-items: center; }
+#barre-minuteur { position: fixed; left: 0; right: 0; bottom: calc(72px + env(safe-area-inset-bottom)); background: var(--accent); color: var(--accent-texte);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; z-index: 12; font-weight: 600; }
+#barre-minuteur button { min-height: 36px; padding: 6px 12px; }
+#barre-minuteur.hidden { display: none; }
 </style>
 </head>
 <body>
 <header class="top" id="entete"></header>
 <main id="contenu"><p class="muted">Chargement…</p></main>
+<div id="barre-minuteur" class="hidden" role="timer" aria-live="polite"></div>
 <nav class="bas hidden" id="navigation">
   <button data-onglet="accueil">Aujourd'hui</button>
   <button data-onglet="programme">Programme</button>
@@ -96,6 +109,8 @@ svg.graph line.axe { stroke: var(--bord); stroke-width: 1; }
 <div id="toast" role="status"></div>
 <input type="file" id="fichier-csv" accept=".csv,.txt,text/csv" class="hidden">
 <input type="file" id="fichier-json" accept=".json,application/json" class="hidden">
+<script src="exercices.js"></script>
+<script src="programme.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

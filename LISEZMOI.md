@@ -54,3 +54,10 @@ L'application accepte aussi le CSV issu de l'export Apple Santé (format long), 
 - Trois séances de suite notées 8/10 ou plus.
 
 Ces alertes donnent des conseils de prudence. Elles ne remplacent pas un avis médical.
+
+## 7. Séances pas à pas (version 2)
+- **Tests de départ** : après le profil, 4 mesures simples (levers-assis, pompes murales, pont, planche) calibrent les charges. Refaisables dans Programme → Tests de départ.
+- **Aujourd'hui → Ouvrir la séance** : chaque exercice affiche un schéma de position, les étapes détaillées, la respiration, le tempo, les erreurs à éviter et des variantes.
+- **Suivi exercice par exercice** : cochez chaque série, lancez le minuteur de repos ou de maintien, notez la douleur de l'exercice.
+- **Programme → Bibliothèque** : les 17 exercices avec leurs fiches complètes.
+- Les schémas sont des représentations indicatives. Un lien vidéo peut être ajouté à chaque exercice dans `exercices.js` (champ `video`).

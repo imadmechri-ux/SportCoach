@@ -1,0 +1,16 @@
+{
+  "name": "Coaching reprise",
+  "short_name": "Coaching",
+  "description": "Programme de reprise sportive, suivi et alertes de récupération. Données stockées sur l'appareil.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f6f8",
+  "theme_color": "#1f3a5f",
+  "lang": "fr",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

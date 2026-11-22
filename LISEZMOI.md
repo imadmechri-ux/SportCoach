@@ -5,7 +5,7 @@ Toutes les données restent sur l'appareil (IndexedDB de Safari). Aucun serveur 
 
 ## 1. Ouvrir l'application sur l'iPhone
 L'application doit être ouverte depuis une adresse en `https://`. Si le dépôt est publié avec GitHub Pages,
-l'adresse est du type `https://<utilisateur>.github.io/AppPriere/coaching/`.
+l'adresse est `https://imadmechri-ux.github.io/SportCoach/`.
 Ouvrez-la dans **Safari**, puis : **Partager → Sur l'écran d'accueil**.
 
 ## 2. Premier lancement

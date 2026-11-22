@@ -1,6 +1,7 @@
 // Service worker : l'application fonctionne hors ligne une fois chargée.
-// Aucune donnée personnelle n'est mise en cache : seulement les fichiers de l'application.
-const VERSION = "coaching-v3";
+// Stratégie "réseau d'abord" : chaque mise à jour arrive dès que l'iPhone est connecté,
+// et le cache sert seulement si le réseau est absent. Aucune donnée personnelle n'est mise en cache.
+const VERSION = "coaching-v4";
 const FICHIERS = ["./", "./index.html", "./app.js", "./exercices.js", "./programme.js", "./adaptation.js", "./coach.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -19,6 +20,12 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    caches.match(e.request).then((reponse) => reponse || fetch(e.request).catch(() => caches.match("./index.html")))
+    fetch(e.request)
+      .then((reponse) => {
+        const copie = reponse.clone();
+        caches.open(VERSION).then((c) => c.put(e.request, copie)).catch(() => {});
+        return reponse;
+      })
+      .catch(() => caches.match(e.request).then((r) => r || caches.match("./index.html")))
   );
 });

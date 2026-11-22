@@ -412,15 +412,47 @@
   }
 
   // ---------- Schémas ----------
-  function illustration(pose) {
-    const P = window.POSES[pose] || window.POSES.debout;
-    const ligne = (pts) => `<polyline points="${pts.map((q) => q.join(",")).join(" ")}"/>`;
-    let g = `<line class="sol" x1="0" y1="150" x2="200" y2="150"/>`;
-    g += `<circle class="tete" cx="${P.h[0]}" cy="${P.h[1]}" r="11"/>`;
-    g += ligne([P.n, P.p]);
-    P.bras.forEach((b) => (g += ligne(b)));
-    P.jambes.forEach((j) => (g += ligne(j)));
-    return `<svg class="pose" viewBox="0 0 200 160" role="img" aria-label="Schéma de la position">${g}</svg>`;
+  // Dessine une figure dans un cadre de 200 px, décalé de dx.
+  function figure(P, dx) {
+    const t = (q) => `${q[0] + dx},${q[1]}`;
+    const ligne = (pts, w) => `<polyline stroke-width="${w}" points="${pts.map(t).join(" ")}"/>`;
+    let g = `<line class="sol" x1="${dx + 4}" y1="150" x2="${dx + 196}" y2="150"/>`;
+    g += ligne([P.n, P.p], 14);
+    P.bras.forEach((b) => (g += ligne(b, 8)));
+    P.jambes.forEach((j) => (g += ligne(j, 10)));
+    P.bras.flat().concat(P.jambes.flat()).concat([P.n, P.p]).forEach((q) => (g += `<circle class="joint" cx="${q[0] + dx}" cy="${q[1]}" r="4.5"/>`));
+    g += `<circle class="tete" cx="${P.h[0] + dx}" cy="${P.h[1]}" r="12"/>`;
+    return g;
+  }
+  // Une position : schéma seul. Deux positions : départ et arrivée côte à côte, avec une flèche.
+  function illustration(pose, pose2) {
+    const A = window.POSES[pose] || window.POSES.debout;
+    if (!pose2) {
+      return `<svg class="pose" viewBox="0 0 200 160" role="img" aria-label="Schéma de la position">${figure(A, 0)}</svg>`;
+    }
+    const B = window.POSES[pose2] || window.POSES.debout;
+    return `<svg class="pose duo" viewBox="0 0 400 170" role="img" aria-label="Schéma du mouvement : départ et arrivée">
+      <text class="legende" x="100" y="16">DÉPART</text>
+      <text class="legende" x="300" y="16">ARRIVÉE</text>
+      <path class="fleche" d="M170 12 H230"/><path class="fleche-tete" d="M234 12 l-9 -6 v12 z"/>
+      <line class="separe" x1="200" y1="28" x2="200" y2="158"/>
+      ${figure(A, 0)}${figure(B, 200)}
+    </svg>`;
+  }
+
+  // Liens Spotify : ouvrent une recherche (aucune lecture automatique)
+  const MUSIQUE = {
+    echauffement: { titre: "Échauffement", requete: "échauffement sport motivation" },
+    marche: { titre: "Marche rapide", requete: "marche rapide motivation" },
+    renfo: { titre: "Renforcement", requete: "workout motivation renforcement" },
+    retour: { titre: "Retour au calme", requete: "relaxation étirements" }
+  };
+  const lienSpotify = (q) => "https://open.spotify.com/search/" + encodeURIComponent(q);
+  function carteMusique(seance) {
+    const cles = ["echauffement", seance.type === "marche" ? "marche" : "renfo", "retour"];
+    return `<div class="carte musique"><h3 class="titre-sport petit">🎧 Musique de la séance</h3>
+      <div class="ligne">${cles.map((c) => `<a class="bouton-lien" href="${lienSpotify(MUSIQUE[c].requete)}" target="_blank" rel="noopener">${esc(MUSIQUE[c].titre)}</a>`).join("")}</div>
+      <p class="muted petit-texte">Ouvre Spotify sur une recherche. Rien n'est lu automatiquement.</p></div>`;
   }
 
   // ---------- Minuteur ----------
@@ -674,6 +706,7 @@
       <p class="muted">Semaine ${seance.semaine} · ${esc(seance.phase)} · ${av.fait}/${av.total} fait(s)</p>
       <div class="barre"><span style="width:${av.total ? Math.round((av.fait / av.total) * 100) : 0}%"></span></div>`;
     if (seance.allege) html += `<div class="bandeau">Séance allégée aujourd'hui : ta récupération le demande. C'est un bon choix.</div>`;
+    html += carteMusique(seance);
     seance.blocs.forEach((b) => {
       html += `<h3 class="titre-bloc">${b.icone} ${esc(b.titre)}</h3>`;
       b.items.forEach((it) => (html += carteExercice(date, it)));
@@ -719,7 +752,7 @@
     const video = ex.video ? `<p><a href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Voir la vidéo de démonstration</a></p>` : "";
     return `<article class="carte exo">
       <div class="ligne" style="justify-content:space-between"><h3>${esc(ex.nom)}</h3><span class="badge">${esc(prescriptionTexte(it))}</span></div>
-      ${illustration(ex.pose)}
+      ${illustration(ex.pose, ex.pose2)}
       <p>${esc(ex.description)}</p>
       <details><summary>Comment faire, pas à pas</summary>
         <ol class="liste">${ex.etapes.map((e) => `<li>${esc(e)}</li>`).join("")}</ol>
@@ -778,7 +811,7 @@
       html += Object.keys(EX()).map((id) => {
         const ex = EX()[id];
         return `<details class="carte"><summary><b>${esc(ex.nom)}</b> <span class="muted">· ${esc(ex.objectif)}</span></summary>
-          ${illustration(ex.pose)}
+          ${illustration(ex.pose, ex.pose2)}
           <p>${esc(ex.description)}</p>
           <ol class="liste">${ex.etapes.map((e) => `<li>${esc(e)}</li>`).join("")}</ol>
           <p><b>Respiration :</b> ${esc(ex.respiration)}</p>

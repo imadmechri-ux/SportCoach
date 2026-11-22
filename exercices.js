@@ -16,7 +16,19 @@ window.POSES = {
   lateral:       { h: [40, 64], n: [54, 80], p: [120, 116], bras: [[[60, 88], [64, 146], [36, 146]]], jambes: [[[120, 116], [160, 130], [186, 146]]] },
   superman:      { h: [34, 112], n: [50, 120], p: [110, 124], bras: [[[56, 120], [30, 108], [12, 104]]], jambes: [[[110, 124], [150, 112], [186, 106]]] },
   mollets:       { h: [100, 22], n: [100, 40], p: [100, 90], bras: [[[100, 46], [110, 72], [104, 94]]], jambes: [[[100, 90], [100, 120], [106, 140]]] },
-  penche:        { h: [60, 44], n: [76, 60], p: [120, 96], bras: [[[76, 66], [90, 92], [98, 122]]], jambes: [[[120, 96], [126, 124], [122, 148]]] }
+  penche:        { h: [60, 44], n: [76, 60], p: [120, 96], bras: [[[76, 66], [90, 92], [98, 122]]], jambes: [[[120, 96], [126, 124], [122, 148]]] },
+  // Positions d'arrivée et variantes de mouvement
+  chaise_debout: { h: [100, 22], n: [100, 40], p: [100, 90], bras: [[[100, 46], [112, 60], [96, 66]]], jambes: [[[100, 90], [100, 120], [102, 148]]] },
+  debout_bras_avant: { h: [100, 22], n: [100, 40], p: [100, 90], bras: [[[100, 46], [124, 50], [146, 50]]], jambes: [[[100, 90], [100, 120], [102, 148]]] },
+  pompe_mur_bas: { h: [58, 60], n: [68, 74], p: [128, 84], bras: [[[72, 80], [52, 92], [38, 84]]], jambes: [[[128, 84], [166, 104], [186, 148]]] },
+  pompe_bas:     { h: [40, 66], n: [52, 76], p: [128, 84], bras: [[[56, 80], [76, 112], [58, 146]]], jambes: [[[128, 84], [170, 110], [190, 146]]] },
+  pompe_genoux_bas: { h: [40, 66], n: [52, 76], p: [124, 84], bras: [[[56, 80], [76, 112], [58, 146]]], jambes: [[[124, 84], [150, 146], [178, 122]]] },
+  pont_bas:      { h: [30, 132], n: [46, 136], p: [108, 136], bras: [[[52, 138], [92, 142], [100, 146]]], jambes: [[[108, 136], [146, 120], [160, 146]]] },
+  superman_bas:  { h: [34, 130], n: [50, 136], p: [110, 140], bras: [[[56, 136], [30, 130], [12, 128]]], jambes: [[[110, 140], [150, 142], [186, 144]]] },
+  mollets_haut:  { h: [100, 22], n: [100, 40], p: [100, 90], bras: [[[100, 46], [110, 72], [104, 94]]], jambes: [[[100, 90], [100, 120], [108, 138]]] },
+  penche_tire:   { h: [60, 44], n: [76, 60], p: [120, 96], bras: [[[76, 66], [60, 80], [84, 90]]], jambes: [[[120, 96], [126, 124], [122, 148]]] },
+  tirage_avant:  { h: [100, 22], n: [100, 40], p: [100, 90], bras: [[[100, 46], [118, 64], [136, 64]]], jambes: [[[100, 90], [100, 120], [102, 148]]] },
+  tirage_arriere:{ h: [100, 22], n: [100, 40], p: [100, 90], bras: [[[100, 46], [82, 54], [72, 66]]], jambes: [[[100, 90], [100, 120], [102, 148]]] }
 };
 
 window.EXERCICES = {
@@ -66,7 +78,7 @@ window.EXERCICES = {
     securite: "L'étirement doit tirer, jamais faire mal.", video: ""
   },
   chaise: {
-    nom: "Levers-assis sur chaise", pose: "chaise", type: "reps", reposSec: 60,
+    nom: "Levers-assis sur chaise", pose: "chaise", pose2: "chaise_debout", type: "reps", reposSec: 60,
     objectif: "Force des jambes et des fessiers", muscles: "Quadriceps, fessiers",
     description: "Le mouvement de se lever d'une chaise : le meilleur point de départ pour renforcer les jambes.",
     etapes: [
@@ -81,7 +93,7 @@ window.EXERCICES = {
     securite: "Arrêtez si une douleur apparaît au genou ou au dos.", video: ""
   },
   pompe_mur: {
-    nom: "Pompes contre un mur", pose: "pompe_mur", type: "reps", reposSec: 60,
+    nom: "Pompes contre un mur", pose: "pompe_mur", pose2: "pompe_mur_bas", type: "reps", reposSec: 60,
     objectif: "Pectoraux, épaules, triceps", muscles: "Poitrine, épaules, bras",
     description: "Version la plus douce de la pompe : le mur réduit la charge sur les épaules et les poignets.",
     etapes: [
@@ -96,7 +108,7 @@ window.EXERCICES = {
     securite: "Arrêtez si une douleur apparaît à l'épaule ou au poignet.", video: ""
   },
   pompe_genoux: {
-    nom: "Pompes sur les genoux", pose: "pompe_genoux", type: "reps", reposSec: 60,
+    nom: "Pompes sur les genoux", pose: "pompe_genoux", pose2: "pompe_genoux_bas", type: "reps", reposSec: 60,
     objectif: "Pectoraux, triceps, gainage", muscles: "Poitrine, bras, abdominaux",
     description: "Étape intermédiaire entre la pompe murale et la pompe au sol.",
     etapes: [
@@ -111,7 +123,7 @@ window.EXERCICES = {
     securite: "Stoppez si la douleur est vive aux poignets.", video: ""
   },
   pompe: {
-    nom: "Pompes au sol", pose: "pompe", type: "reps", reposSec: 90,
+    nom: "Pompes au sol", pose: "pompe", pose2: "pompe_bas", type: "reps", reposSec: 90,
     objectif: "Pectoraux, triceps, gainage", muscles: "Poitrine, bras, abdominaux, dos",
     description: "L'exercice de poussée complet, à faire sur les pieds quand la version genoux devient facile.",
     etapes: [
@@ -126,7 +138,7 @@ window.EXERCICES = {
     securite: "Arrêtez en cas de douleur à l'épaule ou au poignet.", video: ""
   },
   pont: {
-    nom: "Pont fessier", pose: "pont", type: "reps", reposSec: 45,
+    nom: "Pont fessier", pose: "pont_bas", pose2: "pont", type: "reps", reposSec: 45,
     objectif: "Fessiers, arrière de cuisses, bas du dos", muscles: "Fessiers, ischio-jambiers",
     description: "Renforce les fessiers, qui protègent le bas du dos. Très accessible.",
     etapes: [
@@ -141,7 +153,7 @@ window.EXERCICES = {
     securite: "Arrêtez en cas de douleur lombaire.", video: ""
   },
   squat: {
-    nom: "Squat au poids du corps", pose: "squat", type: "reps", reposSec: 60,
+    nom: "Squat au poids du corps", pose: "debout_bras_avant", pose2: "squat", type: "reps", reposSec: 60,
     objectif: "Jambes et fessiers", muscles: "Quadriceps, fessiers, ischio-jambiers",
     description: "Le mouvement de base du bas du corps, à faire sans charge pour apprendre la bonne technique.",
     etapes: [
@@ -156,7 +168,7 @@ window.EXERCICES = {
     securite: "Arrêtez en cas de douleur au genou.", video: ""
   },
   fente: {
-    nom: "Fentes sur place", pose: "fente", type: "reps", reposSec: 60,
+    nom: "Fentes sur place", pose: "debout", pose2: "fente", type: "reps", reposSec: 60,
     objectif: "Équilibre, jambes, fessiers", muscles: "Quadriceps, fessiers, stabilisateurs",
     description: "Travail d'une jambe après l'autre : améliore l'équilibre et corrige les déséquilibres.",
     etapes: [
@@ -216,7 +228,7 @@ window.EXERCICES = {
     securite: "Arrêtez en cas de douleur à l'épaule.", video: ""
   },
   superman: {
-    nom: "Superman", pose: "superman", type: "reps", reposSec: 45,
+    nom: "Superman", pose: "superman_bas", pose2: "superman", type: "reps", reposSec: 45,
     objectif: "Bas du dos et fessiers", muscles: "Lombaires, fessiers, épaules",
     description: "Renforce la chaîne postérieure, souvent négligée et utile pour la posture.",
     etapes: [
@@ -231,7 +243,7 @@ window.EXERCICES = {
     securite: "Arrêtez en cas de douleur lombaire vive.", video: ""
   },
   mollets: {
-    nom: "Élévations de mollets", pose: "mollets", type: "reps", reposSec: 45,
+    nom: "Élévations de mollets", pose: "debout", pose2: "mollets_haut", type: "reps", reposSec: 45,
     objectif: "Mollets et chevilles", muscles: "Gastrocnémiens, soléaire",
     description: "Renforce les mollets, utiles pour la marche et la stabilité.",
     etapes: [
@@ -246,7 +258,7 @@ window.EXERCICES = {
     securite: "Arrêtez en cas de douleur au tendon d'Achille.", video: ""
   },
   rowing: {
-    nom: "Rowing haltères penché", pose: "penche", type: "reps", reposSec: 60,
+    nom: "Rowing haltères penché", pose: "penche", pose2: "penche_tire", type: "reps", reposSec: 60,
     objectif: "Dos et posture", muscles: "Dorsaux, rhomboïdes, biceps",
     description: "Nécessite deux haltères ou deux bouteilles d'eau lourdes.",
     etapes: [
@@ -261,7 +273,7 @@ window.EXERCICES = {
     securite: "Arrêtez en cas de douleur lombaire.", video: ""
   },
   tirage: {
-    nom: "Tirage élastique", pose: "debout", type: "reps", reposSec: 60,
+    nom: "Tirage élastique", pose: "tirage_avant", pose2: "tirage_arriere", type: "reps", reposSec: 60,
     objectif: "Dos et épaules", muscles: "Dorsaux, rhomboïdes, deltoïdes postérieurs",
     description: "Alternative au rowing avec un élastique. Facile à ranger.",
     etapes: [

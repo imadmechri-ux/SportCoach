@@ -121,12 +121,13 @@
     const n = Math.min(6, Math.max(1, Number(p.joursSemaine) || 3));
     const jours = JOURS_SEANCE[n];
     const idx = jourSemaineLundi0(date);
-    if (!jours.includes(idx)) return null;
+    const libre = !!(S.libres && S.libres[date]);
+    if (!jours.includes(idx) && !libre) return null;
 
     const semaine = semaineDe(date);
     const pi = indexPhase(semaine);
     const phase = PH()[pi];
-    const type = jours.indexOf(idx) % 2 === 0 ? "marche" : "renfo";
+    const type = libre && !jours.includes(idx) ? "renfo" : (jours.indexOf(idx) % 2 === 0 ? "marche" : "renfo");
     const materiel = p.materiel || [];
     const allege = besoinAllegement(date);
     const deltas = S.progression.deltas || {};
@@ -651,7 +652,8 @@
 
     if (!seance) {
       html += `<div class="carte repos-carte"><h3 class="titre-sport">Jour de repos</h3>
-        <p>Récupérer fait partie du programme. Une marche tranquille reste bienvenue.</p></div>`;
+        <p>Récupérer fait partie du programme. Une marche tranquille reste bienvenue.</p>
+        <button class="grand" data-action="seance-libre">Démarrer une séance aujourd'hui</button></div>`;
     } else {
       const av = avancementSeance(date, seance);
       const pct = av.total ? av.fait / av.total : 0;
@@ -698,7 +700,8 @@
     if (!seance) {
       return `<div class="carte repos-carte"><h3 class="titre-sport">Pas de séance aujourd'hui</h3>
         <p>Le programme t'attend au prochain jour d'entraînement.</p>
-        <button data-onglet="programme">Voir le programme</button></div>`;
+        <button class="grand" data-action="seance-libre">Démarrer une séance aujourd'hui</button>
+        <button class="secondaire" data-onglet="programme" style="margin-top:8px">Voir le programme</button></div>`;
     }
     const faite = seanceFaite(date);
     const av = avancementSeance(date, seance);
@@ -941,6 +944,9 @@
           S.seances[date] = Object.assign({}, S.seances[date], { fait: false });
           await sauver(); rendu(); return;
         case "passer-minuteur": arreterMinuteur(); rendu(); return;
+        case "seance-libre":
+          S.libres = Object.assign({}, S.libres, { [date]: true });
+          await sauver(); onglet = "seance"; rendu(); window.scrollTo(0, 0); return;
         case "ecouter-coach": COACH.parler(messageCoach(), true); return;
         case "voix":
           S.voix = !S.voix; await sauver();

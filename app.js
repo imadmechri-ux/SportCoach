@@ -710,6 +710,7 @@
       <p class="muted">Semaine ${seance.semaine} · ${esc(seance.phase)} · ${av.fait}/${av.total} fait(s)</p>
       <div class="barre"><span style="width:${av.total ? Math.round((av.fait / av.total) * 100) : 0}%"></span></div>`;
     if (seance.allege) html += `<div class="bandeau">Séance allégée aujourd'hui : ta récupération le demande. C'est un bon choix.</div>`;
+    html += carteMateriel(seance);
     html += carteMusique(seance);
     seance.blocs.forEach((b) => {
       html += `<h3 class="titre-bloc">${b.icone} ${esc(b.titre)}</h3>`;
@@ -729,6 +730,32 @@
           <textarea id="note" placeholder="Comment ça s'est passé ?"></textarea>
           <div class="ligne" style="margin-top:10px"><button class="grand" data-action="valider-seance">Valider la séance</button></div></div>`;
     return html;
+  }
+
+  // Matériel à préparer avant de commencer, selon le type de séance et le matériel du profil
+  function materielRequis(seance) {
+    const mat = (S.profil && S.profil.materiel) || [];
+    const liste = [
+      { nom: "Tenue et chaussures", detail: "Chaussures fermées, vêtements qui ne gênent pas les mouvements." },
+      { nom: "Eau", detail: "Une bouteille à portée de main, posée au sol près de vous." },
+      { nom: "Téléphone", detail: "Son activé, sur une table ou un appui stable : il sert de minuteur et de musique." }
+    ];
+    if (seance.type === "marche") {
+      liste.push({ nom: "Trajet plat et sûr", detail: "Un trottoir ou un parc. Si le temps ne le permet pas, marchez dans votre logement." });
+      liste.push({ nom: "Montre Apple Watch (facultatif)", detail: "Pour suivre votre fréquence cardiaque pendant la marche." });
+    } else {
+      liste.push({ nom: "Chaise stable", detail: "Sans roulettes, posée sur un sol plat (levers-assis)." });
+      liste.push({ nom: "Mur libre", detail: "Pour les pompes murales : posez-vous à environ un bras de distance." });
+      liste.push({ nom: "Tapis ou serviette", detail: "Pour les exercices au sol (pont, planche, superman)." });
+      liste.push({ nom: "Espace d'environ 2 × 2 m", detail: "Pour les fentes et le squat, sans rien à proximité." });
+      if (mat.includes("halteres")) liste.push({ nom: "Haltères ou bouteilles lourdes", detail: "Pour le rowing penché." });
+      if (mat.includes("elastique")) liste.push({ nom: "Élastique", detail: "Fixé à une porte ou à un point stable." });
+    }
+    return liste;
+  }
+  function carteMateriel(seance) {
+    return `<div class="carte materiel"><h3 class="titre-sport petit">🎒 À préparer avant de commencer</h3>
+      <ul class="liste-materiel">${materielRequis(seance).map((m) => `<li><b>${esc(m.nom)}</b><span>${esc(m.detail)}</span></li>`).join("")}</ul></div>`;
   }
 
   function carteExercice(date, it) {

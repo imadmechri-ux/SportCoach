@@ -663,7 +663,7 @@
           ${seance.allege ? '<span class="badge badge-alerte">Allégée</span>' : `<span class="badge" style="background:${couleur}">${esc(seance.phase)}</span>`}
         </div>
         <div class="barre"><span style="width:${Math.round(pct * 100)}%"></span></div>
-        <p class="muted">${av.fait}/${av.total} série(s) ou bloc(s) faits</p>
+        <p class="muted">${av.fait}/${av.total} série(s) ou bloc(s) faits · durée estimée ≈ ${dureeEstimee(seance).total} min</p>
         <ul class="liste-blocs">${seance.blocs.map((b) => `<li>${b.icone} <b>${esc(b.titre)}</b> · ${b.items.map((i) => esc(EX()[i.id].nom)).join(", ")}</li>`).join("")}</ul>
         ${faite
           ? `<p class="succes">✓ Séance terminée · effort ${faite.rpe}/10</p>`
@@ -710,6 +710,7 @@
       <p class="muted">Semaine ${seance.semaine} · ${esc(seance.phase)} · ${av.fait}/${av.total} fait(s)</p>
       <div class="barre"><span style="width:${av.total ? Math.round((av.fait / av.total) * 100) : 0}%"></span></div>`;
     if (seance.allege) html += `<div class="bandeau">Séance allégée aujourd'hui : ta récupération le demande. C'est un bon choix.</div>`;
+    html += carteDuree(seance);
     html += carteMateriel(seance);
     html += carteMusique(seance);
     seance.blocs.forEach((b) => {
@@ -730,6 +731,30 @@
           <textarea id="note" placeholder="Comment ça s'est passé ?"></textarea>
           <div class="ligne" style="margin-top:10px"><button class="grand" data-action="valider-seance">Valider la séance</button></div></div>`;
     return html;
+  }
+
+  // Durée estimée d'une séance : temps de travail, pauses entre séries et mise en place des exercices.
+  // Hypothèse : une répétition dure environ 4 s (tempo lent), 45 s de mise en place par exercice.
+  function dureeEstimee(seance) {
+    const parBloc = seance.blocs.map((b) => {
+      let secondes = 0;
+      b.items.forEach((it) => {
+        if (it.minutes !== undefined) { secondes += it.minutes * 60; return; }
+        const ex = EX()[it.id];
+        const travail = ex.type === "temps" ? it.sec : it.reps * 4;
+        secondes += it.series * travail + Math.max(0, it.series - 1) * it.repos + 45;
+      });
+      return { titre: b.titre, icone: b.icone, minutes: Math.round(secondes / 60) };
+    });
+    return { total: parBloc.reduce((a, b) => a + b.minutes, 0), parBloc };
+  }
+  function carteDuree(seance) {
+    const d = dureeEstimee(seance);
+    const fin = new Date(Date.now() + d.total * 60000);
+    const heure = fin.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    return `<div class="carte duree"><h3 class="titre-sport petit">⏱ Durée estimée : ${d.total} min</h3>
+      <ul class="liste-duree">${d.parBloc.map((b) => `<li><span>${b.icone} ${esc(b.titre)}</span><b>${b.minutes} min</b></li>`).join("")}</ul>
+      <p class="muted petit-texte">Si vous commencez maintenant, vous aurez fini vers ${heure}. Les pauses et les séries difficiles peuvent allonger la séance.</p></div>`;
   }
 
   // Matériel à préparer, avec des alternatives que l'utilisateur peut choisir à la place

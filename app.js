@@ -115,6 +115,15 @@
   }
 
   // Séance d'une date : blocs successifs, charges adaptées à l'historique
+  // Temps de travail estimé d'une liste d'exercices (répétitions à 4 s, pauses, 45 s de mise en place)
+  function estimerItems(items) {
+    return items.reduce((t, it) => {
+      const ex = EX()[it.id];
+      const travail = ex.type === "temps" ? it.sec : it.reps * 4;
+      return t + it.series * travail + Math.max(0, it.series - 1) * it.repos + 45;
+    }, 0);
+  }
+
   function construireSeance(date) {
     const p = S.profil;
     if (!p || !S.debut || joursEntre(date, S.debut) < 0) return null;
@@ -132,24 +141,39 @@
     const allege = besoinAllegement(date);
     const deltas = S.progression.deltas || {};
 
+    // Durée totale visée = minutes du profil (échauffement et retour au calme compris)
+    const cible = (Number(p.minutes) || 30) * 60;
+    const budget = Math.max(0, cible - 5 * 60 - 3 * 60) * (allege ? 0.75 : 1);
     const blocs = [{ titre: "Échauffement", icone: "🔥", items: [{ id: "mobilite", minutes: 5 }] }];
     if (type === "marche") {
-      let minutes = phase.marcheMin + (S.progression.marcheDelta || 0);
-      minutes = Math.min(Number(p.minutes) || 20, Math.max(10, minutes));
-      if (allege) minutes = Math.max(10, Math.round(minutes * 0.7));
+      const minutes = Math.max(5, Math.round(budget / 60));
       blocs.push({ titre: "Marche", icone: "👟", items: [{ id: "marche", minutes }] });
     } else {
-      const liste = phase.renfo.slice();
-      if (materiel.includes("halteres")) liste.push("rowing");
-      if (materiel.includes("elastique")) liste.push("tirage");
-      let series = phase.series;
-      if (allege) series = Math.max(1, series - 1);
-      blocs.push({
-        titre: "Renforcement", icone: "💪",
-        items: liste.map((id) => Object.assign(
-          { id, series, repos: EX()[id].reposSec || 60 },
-          window.prescrireAdaptatif(id, pi, p.tests, deltas[id] || 0, allege)))
-      });
+      const extras = [];
+      if (materiel.includes("halteres")) extras.push("rowing");
+      if (materiel.includes("elastique")) extras.push("tirage");
+      const pool = ["superman", "mollets", "lateral", "pont", "chaise", "pompe_genoux"];
+      const construire = (l, s) => l.map((id) => Object.assign(
+        { id, series: s, repos: EX()[id].reposSec || 60 },
+        window.prescrireAdaptatif(id, pi, p.tests, deltas[id] || 0, allege)));
+      const tient = (l, s) => estimerItems(construire(l, s)) <= budget;
+      let s = Math.max(1, phase.series - (allege ? 1 : 0));
+      let l = phase.renfo.concat(extras);
+      // Trop long : on réduit d'abord les séries, puis les exercices
+      while (!tient(l, s) && s > 2) s--;
+      while (!tient(l, s) && l.length > 2) l = l.slice(0, -1);
+      while (!tient(l, s) && s > 1) s--;
+      // Trop court : on ajoute une série, puis un exercice d'appoint
+      let progres = true;
+      while (progres) {
+        progres = false;
+        if (s < phase.series + 1 && tient(l, s + 1)) { s++; progres = true; }
+        else {
+          const extra = pool.find((id) => !l.includes(id) && tient(l.concat(id), s));
+          if (extra) { l = l.concat(extra); progres = true; }
+        }
+      }
+      blocs.push({ titre: "Renforcement", icone: "💪", items: construire(l, s) });
     }
     blocs.push({ titre: "Retour au calme", icone: "🧘", items: [{ id: "etirement", minutes: 3 }] });
     return { date, semaine, phase: phase.nom, phaseIndex: pi, type, allege,

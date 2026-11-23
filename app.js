@@ -732,30 +732,76 @@
     return html;
   }
 
-  // Matériel à préparer avant de commencer, selon le type de séance et le matériel du profil
+  // Matériel à préparer, avec des alternatives que l'utilisateur peut choisir à la place
+  const ALTERNATIVES = {
+    chaise: [
+      { nom: "Canapé ferme ou lit à hauteur d'assise", detail: "Assise ferme et stable, dos calé contre un mur. Un canapé mou est déconseillé." },
+      { nom: "Tabouret solide à environ 45 cm", detail: "Pieds antidérapants, posé contre un mur ou sur un sol plat." }
+    ],
+    mur: [
+      { nom: "Plan de travail de cuisine", detail: "Pompes inclinées : mains sur le plan, corps en diagonale. Vérifiez qu'il ne bouge pas." },
+      { nom: "Table solide", detail: "Même principe que le plan de travail. Table lourde ou fixée au sol uniquement." }
+    ],
+    tapis: [
+      { nom: "Couverture pliée en deux ou trois", detail: "Épaisseur suffisante pour les genoux et le dos pendant les exercices au sol." },
+      { nom: "Moquette ou tapis épais", detail: "Vérifiez qu'il ne glisse pas." },
+      { nom: "Serviette de bain roulée", detail: "Sous les genoux ou les coudes pour les planches." }
+    ],
+    halteres: [
+      { nom: "Bouteilles d'eau 1,5 ou 2 L", detail: "Pleines, tenues fermement. Un bon remplacement pour le rowing." },
+      { nom: "Sac à dos chargé de livres", detail: "Bretelles bien serrées, poids réparti. Gardez le dos droit." },
+      { nom: "Bidon de lessive plein", detail: "Plus lourd : tenez-le à deux mains et commencez léger." }
+    ],
+    elastique: [
+      { nom: "Serviette épaisse tenue aux deux mains", detail: "Tirez les deux extrémités vers l'arrière, en gardant les coudes près du corps." },
+      { nom: "Sac à dos avec bretelles", detail: "Accrochez-le à une poignée de porte fermée pour un tirage contrôlé." }
+    ],
+    montre: [
+      { nom: "Téléphone dans la poche ou posé", detail: "L'application suit les pas et le temps de marche sans montre." }
+    ],
+    espace: [
+      { nom: "Couloir ou balcon dégagé", detail: "Vérifiez qu'il n'y a ni meuble ni objet fragile à moins d'un bras." }
+    ]
+  };
+
   function materielRequis(seance) {
     const mat = (S.profil && S.profil.materiel) || [];
     const liste = [
-      { nom: "Tenue et chaussures", detail: "Chaussures fermées, vêtements qui ne gênent pas les mouvements." },
-      { nom: "Eau", detail: "Une bouteille à portée de main, posée au sol près de vous." },
-      { nom: "Téléphone", detail: "Son activé, sur une table ou un appui stable : il sert de minuteur et de musique." }
+      { cle: "tenue", nom: "Tenue et chaussures", detail: "Chaussures fermées, vêtements qui ne gênent pas les mouvements.", alternatives: [] },
+      { cle: "eau", nom: "Eau", detail: "Une bouteille à portée de main, posée au sol près de vous.", alternatives: [{ nom: "Gourde ou verre d'eau", detail: "Tout récipient facile à attraper entre les séries." }] },
+      { cle: "telephone", nom: "Téléphone", detail: "Son activé, sur une table ou un appui stable : il sert de minuteur et de musique.", alternatives: [] }
     ];
     if (seance.type === "marche") {
-      liste.push({ nom: "Trajet plat et sûr", detail: "Un trottoir ou un parc. Si le temps ne le permet pas, marchez dans votre logement." });
-      liste.push({ nom: "Montre Apple Watch (facultatif)", detail: "Pour suivre votre fréquence cardiaque pendant la marche." });
+      liste.push({ cle: "espace", nom: "Trajet plat et sûr", detail: "Un trottoir ou un parc. Si le temps ne le permet pas, marchez dans votre logement.", alternatives: ALTERNATIVES.espace });
+      liste.push({ cle: "montre", nom: "Montre Apple Watch (facultatif)", detail: "Pour suivre votre fréquence cardiaque pendant la marche.", alternatives: ALTERNATIVES.montre });
     } else {
-      liste.push({ nom: "Chaise stable", detail: "Sans roulettes, posée sur un sol plat (levers-assis)." });
-      liste.push({ nom: "Mur libre", detail: "Pour les pompes murales : posez-vous à environ un bras de distance." });
-      liste.push({ nom: "Tapis ou serviette", detail: "Pour les exercices au sol (pont, planche, superman)." });
-      liste.push({ nom: "Espace d'environ 2 × 2 m", detail: "Pour les fentes et le squat, sans rien à proximité." });
-      if (mat.includes("halteres")) liste.push({ nom: "Haltères ou bouteilles lourdes", detail: "Pour le rowing penché." });
-      if (mat.includes("elastique")) liste.push({ nom: "Élastique", detail: "Fixé à une porte ou à un point stable." });
+      liste.push({ cle: "chaise", nom: "Chaise stable", detail: "Sans roulettes, posée sur un sol plat (levers-assis).", alternatives: ALTERNATIVES.chaise });
+      liste.push({ cle: "mur", nom: "Mur libre", detail: "Pour les pompes murales : posez-vous à environ un bras de distance.", alternatives: ALTERNATIVES.mur });
+      liste.push({ cle: "tapis", nom: "Tapis ou serviette", detail: "Pour les exercices au sol (pont, planche, superman).", alternatives: ALTERNATIVES.tapis });
+      liste.push({ cle: "espace", nom: "Espace d'environ 2 × 2 m", detail: "Pour les fentes et le squat, sans rien à proximité.", alternatives: ALTERNATIVES.espace });
+      if (mat.includes("halteres")) liste.push({ cle: "halteres", nom: "Haltères", detail: "Pour le rowing penché.", alternatives: ALTERNATIVES.halteres });
+      if (mat.includes("elastique")) liste.push({ cle: "elastique", nom: "Élastique", detail: "Fixé à une porte ou à un point stable.", alternatives: ALTERNATIVES.elastique });
     }
     return liste;
   }
   function carteMateriel(seance) {
+    const choix = S.materielAlt || {};
+    const items = materielRequis(seance).map((m) => {
+      const idx = choix[m.cle];
+      const alt = m.alternatives.length && idx !== undefined && idx !== "" ? m.alternatives[Number(idx)] : null;
+      const nom = alt ? alt.nom : m.nom;
+      const detail = alt ? alt.detail : m.detail;
+      const menu = m.alternatives.length
+        ? `<select data-mat-alt="${m.cle}" class="alt-select" aria-label="Remplacer ${esc(m.nom)}">
+            <option value="">Mon matériel : ${esc(m.nom)}</option>
+            ${m.alternatives.map((a, i) => `<option value="${i}" ${String(idx) === String(i) ? "selected" : ""}>Remplacer par : ${esc(a.nom)}</option>`).join("")}
+          </select>`
+        : "";
+      return `<li><b>${esc(nom)}</b><span>${esc(detail)}</span>${menu}</li>`;
+    }).join("");
     return `<div class="carte materiel"><h3 class="titre-sport petit">🎒 À préparer avant de commencer</h3>
-      <ul class="liste-materiel">${materielRequis(seance).map((m) => `<li><b>${esc(m.nom)}</b><span>${esc(m.detail)}</span></li>`).join("")}</ul></div>`;
+      <p class="muted petit-texte">Pas de matériel sous la main ? Choisissez une alternative dans le menu de chaque élément.</p>
+      <ul class="liste-materiel">${items}</ul></div>`;
   }
 
   function carteExercice(date, it) {
@@ -996,6 +1042,10 @@
 
     document.body.addEventListener("change", async (e) => {
       if (e.target.dataset.douleur) await douleurItem(aujourdhui(), e.target.dataset.douleur, Number(e.target.value));
+      if (e.target.dataset.matAlt) {
+        S.materielAlt = Object.assign({}, S.materielAlt, { [e.target.dataset.matAlt]: e.target.value });
+        await sauver(); rendu();
+      }
     });
 
     document.body.addEventListener("submit", async (e) => {

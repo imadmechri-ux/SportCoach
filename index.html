@@ -150,6 +150,13 @@ ul.liste-duree { list-style: none; padding: 0; margin: 8px 0 0; }
 ul.liste-duree li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed var(--bord); }
 ul.liste-duree b { color: var(--lime); }
 .duree { border-color: rgba(198,255,61,.4); }
+.chrono { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.chrono-etape { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chrono-suite { font-size: 12px; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chrono-temps { font-size: 34px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+.chrono-btns { display: flex; gap: 6px; }
+.chrono-btns button { min-height: 44px; min-width: 44px; padding: 6px 10px; background: #111; color: #fff; box-shadow: none; border: 0; }
+.chrono-carte { border-color: rgba(255,154,31,.5); }
 .alt-select { margin-top: 6px; font-size: 14px; padding: 9px 10px; }
 .carte-test svg.pose { color: var(--orange2); }
 details { margin-top: 8px; }

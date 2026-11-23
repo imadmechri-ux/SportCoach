@@ -53,6 +53,7 @@
   let choixSuivi = "fcRepos";
   let choixProgramme = "plan";
   let minuteur = null, tickId = null;
+  let parcours = null, pTick = null;
 
   function ouvrirBase() {
     return new Promise((res, rej) => {
@@ -482,6 +483,7 @@
 
   // ---------- Minuteur ----------
   function demarrerMinuteur(id, secondes, libelle, auFin) {
+    if (parcours) return;
     arreterMinuteur();
     minuteur = { id, fin: Date.now() + secondes * 1000, libelle, auFin };
     tickId = setInterval(tick, 300);
@@ -507,10 +509,111 @@
   }
   function rendreBarre() {
     const b = $("#barre-minuteur");
+    if (parcours) {
+      const c = parcours.etapes[parcours.index];
+      const suivante = parcours.etapes[parcours.index + 1];
+      b.classList.remove("hidden");
+      b.innerHTML = `<div class="chrono">
+          <span class="chrono-etape">${parcours.index + 1}/${parcours.etapes.length} · ${esc(c.libelle)}</span>
+          <span class="chrono-suite">${suivante ? "Ensuite : " + esc(suivante.libelle) : "Dernière étape"}</span></div>
+        <b id="chrono-temps" class="chrono-temps">${duree(parcours.reste)}</b>
+        <div class="chrono-btns">
+          <button class="secondaire" data-action="chrono-pause" aria-label="${parcours.pause ? "Reprendre" : "Pause"}">${parcours.pause ? "▶" : "❚❚"}</button>
+          <button class="secondaire" data-action="chrono-suivant" aria-label="Étape suivante">⏭</button>
+          <button class="secondaire" data-action="chrono-stop" aria-label="Arrêter">■</button>
+        </div>`;
+      return;
+    }
     if (!minuteur) { b.classList.add("hidden"); b.innerHTML = ""; return; }
     b.classList.remove("hidden");
     b.innerHTML = `<span id="minuteur-texte"></span><button class="secondaire" data-action="passer-minuteur">Passer</button>`;
     tick();
+  }
+
+  // ---------- Chrono de séance guidé (barre du bas, reste visible sur tous les onglets) ----------
+  function etapesSeance(seance) {
+    const etapes = [];
+    seance.blocs.forEach((b) => b.items.forEach((it) => {
+      const ex = EX()[it.id];
+      if (ex.type === "bloc") {
+        etapes.push({ libelle: `${b.icone} ${ex.nom}`, sec: it.minutes * 60, consigne: ex.description, bloc: it.id });
+        return;
+      }
+      const travail = ex.type === "temps" ? it.sec : it.reps * 4;
+      for (let i = 0; i < it.series; i++) {
+        etapes.push({ libelle: `${ex.nom} · série ${i + 1}/${it.series}`, sec: travail,
+          consigne: ex.type === "temps" ? `Tenez ${it.sec} secondes.` : `${it.reps} répétitions, ${ex.tempo}.`,
+          id: it.id, serie: i, total: it.series });
+        if (i < it.series - 1 && it.repos > 0)
+          etapes.push({ libelle: "Repos", sec: it.repos, consigne: "Respirez, buvez un peu d'eau.", repos: true });
+      }
+    }));
+    return etapes;
+  }
+  function annoncer(etape) {
+    const texte = etape.repos ? `Repos, ${etape.sec} secondes.` : `${etape.libelle}. ${etape.consigne || ""}`;
+    COACH.parler(texte, S.voix);
+  }
+  function lancerParcours(date, seance) {
+    arreterMinuteur();
+    const etapes = etapesSeance(seance);
+    if (!etapes.length) return;
+    parcours = { date, etapes, index: 0, pause: false, reste: etapes[0].sec, fin: Date.now() + etapes[0].sec * 1000 };
+    annoncer(etapes[0]);
+    if (pTick) clearInterval(pTick);
+    pTick = setInterval(tickParcours, 250);
+    rendreBarre();
+  }
+  function arreterParcours() {
+    if (pTick) clearInterval(pTick);
+    pTick = null; parcours = null;
+  }
+  function tickParcours() {
+    if (!parcours || parcours.pause) return;
+    // Rattrape les étapes passées si l'écran a été verrouillé
+    while (parcours && Date.now() >= parcours.fin) {
+      if (passerEtape(true)) return;
+    }
+    if (parcours) {
+      parcours.reste = Math.max(0, Math.ceil((parcours.fin - Date.now()) / 1000));
+      const el = document.getElementById("chrono-temps");
+      if (el) el.textContent = duree(parcours.reste);
+    }
+  }
+  // Passe à l'étape suivante. marquer = true si l'étape a été menée à terme (coche la série ou le bloc).
+  // Renvoie true si le chrono est terminé.
+  function passerEtape(marquer) {
+    const c = parcours.etapes[parcours.index];
+    if (marquer && c.serie !== undefined) suiviItem(parcours.date, c.id, c.total).faites[c.serie] = true;
+    if (marquer && c.bloc) suiviItem(parcours.date, c.bloc, 0).faites[0] = true;
+    parcours.index++;
+    if (parcours.index >= parcours.etapes.length) { terminerParcours(); return true; }
+    const n = parcours.etapes[parcours.index];
+    parcours.reste = n.sec;
+    parcours.fin = Date.now() + n.sec * 1000;
+    try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) { /* ignoré */ }
+    annoncer(n);
+    sauver();
+    return false;
+  }
+  function chronoPause() {
+    if (!parcours) return;
+    if (!parcours.pause) {
+      parcours.pause = true;
+      parcours.reste = Math.max(0, Math.ceil((parcours.fin - Date.now()) / 1000));
+    } else {
+      parcours.pause = false;
+      parcours.fin = Date.now() + parcours.reste * 1000;
+    }
+    rendreBarre();
+  }
+  function terminerParcours() {
+    arreterParcours();
+    sauver();
+    try { navigator.vibrate && navigator.vibrate([400, 150, 400, 150, 400]); } catch (e) { /* ignoré */ }
+    toast("Chrono terminé. Valide ta séance pour noter ton effort.");
+    COACH.parler("Chrono terminé ! Bravo. Valide ta séance pour noter ton effort.", S.voix);
+    rendu();
   }
 
   // ---------- Actions sur la séance ----------
@@ -734,6 +837,12 @@
       <p class="muted">Semaine ${seance.semaine} · ${esc(seance.phase)} · ${av.fait}/${av.total} fait(s)</p>
       <div class="barre"><span style="width:${av.total ? Math.round((av.fait / av.total) * 100) : 0}%"></span></div>`;
     if (seance.allege) html += `<div class="bandeau">Séance allégée aujourd'hui : ta récupération le demande. C'est un bon choix.</div>`;
+    const chronoActif = parcours && parcours.date === date;
+    html += chronoActif
+      ? `<div class="carte chrono-carte"><p><b>Chrono en cours</b> : suivez-le dans la barre du bas, vous pouvez changer d'onglet.</p>
+          <button class="secondaire" data-action="chrono-stop">Arrêter le chrono</button></div>`
+      : `<button class="grand" data-action="chrono-start">⏱ Lancer le chrono de la séance</button>
+         <p class="muted petit-texte centre">Enchaîne automatiquement chaque série, chaque repos et les blocs chronométrés. L'écran doit rester allumé.</p>`;
     html += carteDuree(seance);
     html += carteMateriel(seance);
     html += carteMusique(seance);
@@ -1066,6 +1175,14 @@
           S.seances[date] = Object.assign({}, S.seances[date], { fait: false });
           await sauver(); rendu(); return;
         case "passer-minuteur": arreterMinuteur(); rendu(); return;
+        case "chrono-start": {
+          const sc = construireSeance(date);
+          if (sc) lancerParcours(date, sc);
+          rendu(); return;
+        }
+        case "chrono-pause": chronoPause(); return;
+        case "chrono-suivant": if (parcours) { passerEtape(false); rendu(); } return;
+        case "chrono-stop": arreterParcours(); rendreBarre(); rendu(); return;
         case "seance-libre":
           S.libres = Object.assign({}, S.libres, { [date]: true });
           await sauver(); onglet = "seance"; rendu(); window.scrollTo(0, 0); return;
